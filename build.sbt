@@ -9,7 +9,6 @@ libraryDependencies ++= Seq(
   "org.igniterealtime.smack" % "smack-tcp" % smackVersion,
   "org.igniterealtime.smack" % "smack-im" % smackVersion,
   "org.igniterealtime.smack" % "smack-extensions" % smackVersion,
-  "com.github.scopt" %% "scopt" % "3.3.0",
   "com.typesafe.akka" % "akka-actor_2.11" % "2.3.12",
   "org.scalatest" %% "scalatest" % "2.2.4" % Test,
 

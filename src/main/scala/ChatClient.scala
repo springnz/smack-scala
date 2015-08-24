@@ -7,87 +7,91 @@ import org.jivesoftware.smack.packet.Message
 import org.jivesoftware.smack.tcp.XMPPTCPConnection
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration
 import collection.JavaConversions._
+import akka.pattern.ask
+import akka.util.Timeout
+import concurrent.duration._
+import concurrent.Await
 
 object ChatClient extends App {
   object Messages {
-    case class Echo(message: String)
+    case class Connect(username: String, password: String)
     object Shutdown
+    object Connected
   }
   import Messages._
+  implicit val timeout = Timeout(5 seconds)
 
-  case class Config(username: String, password: String)
+  val host = "akllap015.corp"
+  val system = ActorSystem()
+  val chattie = system.actorOf(Props[ChatActor], "chatClient")
 
-  val parser = new scopt.OptionParser[Config]("scopt") {
-    head("ChatClient")
+  var on = true
+  while (on) {
+    println("What next?")
 
-    opt[String]('u', "username") required () action { (x, c) ⇒
-      c.copy(username = x)
-    } text ("username is a mandatory string")
+    io.StdIn.readLine match {
+      case "connect" ⇒
+        // println("username: "); val username = io.StdIn.readLine
+        // println("password: "); val password = io.StdIn.readLine
+        val username = "admin4"
+        val password = "admin4"
+        Await.ready(chattie ? Connect(username, password), 5 seconds)
+        println("connected")
 
-    opt[String]('p', "password") required () action { (x, c) ⇒
-      c.copy(password = x)
-    } text ("password is a mandatory string")
+      case "exit" ⇒
+        chattie ! Shutdown
+        on = false
+
+      case _ ⇒ println("Que? No comprendo. Try again!")
+    }
   }
-
-  parser.parse(args, Config("req", "req")) match {
-    case None ⇒
-    case Some(config) ⇒
-      val host = "akllap015.corp"
-      val xmppConfigBuilder = XMPPTCPConnectionConfiguration.builder
-        .setUsernameAndPassword(config.username, config.password)
-        .setServiceName("corp")
-        .setHost(host)
-        .setSecurityMode(SecurityMode.disabled)
-        .build
-
-      println(s"connecting to $host using ${config.username} / ${config.password}")
-      new ChatClient(xmppConfigBuilder)
-  }
-
-  // val system = ActorSystem()
-  // val chattie = system.actorOf(Props(classOf[ChatActor], "blub"), "chatClient")
-
-  // chattie ! Echo("test")
-  // chattie ! Shutdown
 }
 
-class ChatActor(xmppConfig: String) extends Actor {
+class ChatActor extends Actor {
   import ChatClient.Messages._
 
-  override def receive = {
-    case Echo(message) => println(message)
+  var connection: XMPPTCPConnection = _
 
-    case Shutdown =>
-      println("shutting down system")
+  override def receive = {
+    case c: Connect ⇒
+      connect(c)
+      sender ! Connected
+
+    case Shutdown ⇒
+      println("shutting down")
+      disconnect()
       context.system.shutdown()
   }
-}
 
+  def connect(connect: Connect) = {
+    disconnect()
+    connection = new XMPPTCPConnection(
+      XMPPTCPConnectionConfiguration.builder
+      .setUsernameAndPassword(connect.username, connect.password)
+      .setServiceName("corp")
+      .setHost(ChatClient.host)
+      .setSecurityMode(SecurityMode.disabled)
+      .build
+    )
+    connection.connect().login()
 
-class ChatClient(xmppConfig: XMPPTCPConnectionConfiguration) {
-  val connection = new XMPPTCPConnection(xmppConfig)
-  connection.connect().login()
-
-  val chatManager = ChatManager.getInstanceFor(connection)
-  chatManager.addChatListener(new ChatManagerListener() {
-    override def chatCreated(chat: Chat, createdLocally: Boolean): Unit = {
-      println(s"ChatManagerListener: chat created: $chat; locally: $createdLocally")
-    }
-  })
-
-  def chatTo(otherUser: String): Unit = {
-    val chat = chatManager.createChat(otherUser)
-    chat.addMessageListener(new ChatMessageListener() {
-      override def processMessage(chat: Chat, message: Message): Unit = {
-        println(s"ChatMessageListener: received message for $chat : $message")
+    val chatManager = ChatManager.getInstanceFor(connection)
+    chatManager.addChatListener(new ChatManagerListener() {
+      override def chatCreated(chat: Chat, createdLocally: Boolean): Unit = {
+        println(s"ChatManagerListener: chat created: $chat; locally: $createdLocally")
       }
     })
-    chat.sendMessage(s"hello $otherUser")
   }
 
-  // chatTo("admin5@corp")
-
-  Thread.sleep(1000)
-  connection.disconnect()
-  println("done")
+  def disconnect() = Option(connection).map(_.disconnect())
 }
+
+//   def chatTo(otherUser: String): Unit = {
+//     val chat = chatManager.createChat(otherUser)
+//     chat.addMessageListener(new ChatMessageListener() {
+//       override def processMessage(chat: Chat, message: Message): Unit = {
+//         println(s"ChatMessageListener: received message for $chat : $message")
+//       }
+//     })
+//     chat.sendMessage(s"hello $otherUser")
+//   }
