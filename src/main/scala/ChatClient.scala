@@ -7,64 +7,135 @@ import org.jivesoftware.smack.packet.Message
 import org.jivesoftware.smack.tcp.XMPPTCPConnection
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration
 import collection.JavaConversions._
-import akka.pattern.ask
-import akka.util.Timeout
-import concurrent.duration._
-import concurrent.Await
+import collection.mutable
 
 object ChatClient extends App {
+  type User = String
   object Messages {
     case class Connect(username: String, password: String)
+    case class ChatTo(otherUser: User)
+    case class SendMessage(otherUser: User, message: String)
+    case class LeaveChat(otherUser: User)
+    object Disconnect
     object Shutdown
-    object Connected
   }
   import Messages._
-  implicit val timeout = Timeout(5 seconds)
 
   val host = "akllap015.corp"
+  val domain = "corp"
   val system = ActorSystem()
   val chattie = system.actorOf(Props[ChatActor], "chatClient")
 
   var on = true
+  computerSays("What now?")
   while (on) {
-    println("What next?")
-
     io.StdIn.readLine match {
       case "connect" ⇒
-        // println("username: "); val username = io.StdIn.readLine
+        println("username: "); val username = io.StdIn.readLine
+        val password = username
         // println("password: "); val password = io.StdIn.readLine
-        val username = "admin4"
-        val password = "admin4"
-        Await.ready(chattie ? Connect(username, password), 5 seconds)
-        println("connected")
+        // val username = "admin5"
+        // val password = "admin5"
+        chattie ! Connect(username, password)
+
+      case "openchat" ⇒
+        computerSays("who may i connect you with, sir?")
+        val user = io.StdIn.readLine
+        chattie ! ChatTo(user)
+
+      case "message" ⇒
+        computerSays("who do you want to send a message to, sir?")
+        val user = io.StdIn.readLine
+        computerSays("what's your message, sir?")
+        val message = io.StdIn.readLine
+        chattie ! SendMessage(user, message)
+
+      case "leavechat" ⇒
+        computerSays("who may i disconnect you from, sir?")
+        val user = io.StdIn.readLine
+        chattie ! LeaveChat(user)
+
+      case "disconnect" ⇒
+        chattie ! Disconnect
 
       case "exit" ⇒
+        computerSays("shutting down")
         chattie ! Shutdown
         on = false
 
-      case _ ⇒ println("Que? No comprendo. Try again!")
+      case _ ⇒ computerSays("Que? No comprendo. Try again, sir!")
     }
   }
+
+  def computerSays(s: String) = println(s">> $s")
 }
 
 class ChatActor extends Actor {
+  import ChatClient._
   import ChatClient.Messages._
+  import context._
 
   var connection: XMPPTCPConnection = _
+  var chatManager: ChatManager = _
+  val chats = mutable.Map.empty[User, Chat]
 
   override def receive = {
     case c: Connect ⇒
       connect(c)
-      sender ! Connected
+      become(connected)
+
+    case Shutdown ⇒ context.system.shutdown()
+    case _        ⇒ computerSays("not connected!")
+  }
+
+  def connected: Receive = {
+    case ChatTo(name) ⇒
+      println(s"creating chat to $name")
+      chatTo(name)
+      become(inChat)
+
+    case Disconnect ⇒
+      disconnect()
+      unbecome()
 
     case Shutdown ⇒
-      println("shutting down")
+      self ! Disconnect
+      self ! Shutdown
+
+    case Connect ⇒ computerSays("already connected!")
+    case _       ⇒ computerSays("connected, but not in chat!")
+  }
+
+  def inChat: Receive = {
+    case LeaveChat(otherUser) ⇒
+      chats.get(otherUser) match {
+        case Some(chat) ⇒
+          chat.close()
+          chats -= otherUser
+          computerSays(s"left chat with $otherUser")
+        case _ ⇒ computerSays(s"no chat open with user $otherUser")
+      }
+
+    case SendMessage(otherUser, message) ⇒
+      chats.get(otherUser) match {
+        case Some(chat) ⇒
+          chat.sendMessage(message)
+          computerSays(s"message sent to $otherUser")
+        case None ⇒ computerSays(s"no chat with user $otherUser found!")
+      }
+
+    case Disconnect ⇒
       disconnect()
-      context.system.shutdown()
+      unbecome()
+
+    case Shutdown ⇒
+      self ! Disconnect
+      self ! Shutdown
+
+    case Connect ⇒ computerSays("already connected!")
   }
 
   def connect(connect: Connect) = {
-    disconnect()
     connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
       .setUsernameAndPassword(connect.username, connect.password)
@@ -75,23 +146,33 @@ class ChatActor extends Actor {
     )
     connection.connect().login()
 
-    val chatManager = ChatManager.getInstanceFor(connection)
-    chatManager.addChatListener(new ChatManagerListener() {
+    chatManager = ChatManager.getInstanceFor(connection)
+    chatManager.addChatListener(new ChatManagerListener {
       override def chatCreated(chat: Chat, createdLocally: Boolean): Unit = {
-        println(s"ChatManagerListener: chat created: $chat; locally: $createdLocally")
+        computerSays(s"ChatManagerListener: chat created: $chat; locally: $createdLocally")
+        chat.addMessageListener(printingMessageListener)
       }
     })
+    computerSays("connected")
   }
 
-  def disconnect() = Option(connection).map(_.disconnect())
+  def disconnect() = {
+    chats.values.foreach(_.close())
+    chats.clear()
+    Option(connection).map(_.disconnect())
+    computerSays("disconnected")
+  }
+
+  def chatTo(otherUser: User): Unit = {
+    val chat = chatManager.createChat(s"$otherUser@$domain")
+    chat.addMessageListener(printingMessageListener)
+    chats += otherUser → chat
+  }
+
+  def printingMessageListener = new ChatMessageListener {
+    override def processMessage(chat: Chat, message: Message): Unit = {
+      computerSays(s"ChatMessageListener: received message for $chat : $message")
+    }
+  }
 }
 
-//   def chatTo(otherUser: String): Unit = {
-//     val chat = chatManager.createChat(otherUser)
-//     chat.addMessageListener(new ChatMessageListener() {
-//       override def processMessage(chat: Chat, message: Message): Unit = {
-//         println(s"ChatMessageListener: received message for $chat : $message")
-//       }
-//     })
-//     chat.sendMessage(s"hello $otherUser")
-//   }
