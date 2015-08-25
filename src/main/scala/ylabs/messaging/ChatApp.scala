@@ -3,7 +3,7 @@ package ylabs.messaging
 import akka.actor.{ ActorSystem, Props }
 import scala.collection.JavaConversions._
 
-object ChatClientApp extends App {
+object ChatApp extends App {
   import ChatClient.Messages._
 
   val system = ActorSystem()
