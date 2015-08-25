@@ -1,7 +1,7 @@
 package ylabs.messaging
 
+import org.scalatest.{ Matchers, WordSpec }
 import scala.collection.JavaConversions._
-import org.scalatest.{Matchers, WordSpec}
 
 class ChatClientSpec extends WordSpec with Matchers {
 

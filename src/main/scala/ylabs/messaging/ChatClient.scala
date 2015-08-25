@@ -1,15 +1,12 @@
 package ylabs.messaging
 
+import akka.actor.{ Actor, ActorSystem }
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
-import akka.actor.ActorSystem
-import akka.actor.Actor
-import akka.actor.Props
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet.Message
-import org.jivesoftware.smack.tcp.XMPPTCPConnection
-import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration
-import collection.JavaConversions._
-import collection.mutable
+import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
+import scala.collection.JavaConversions._
+import scala.collection.mutable
 
 object ChatClient {
   type User = String
