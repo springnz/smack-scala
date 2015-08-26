@@ -4,7 +4,7 @@ import akka.actor.{ ActorSystem, Props }
 import scala.collection.JavaConversions._
 
 object ChatApp extends App {
-  import ChatClient.Messages._
+  import Client.Messages._
 
   val system = ActorSystem()
   val chattie = system.actorOf(Props[ChatActor], "chatClient")

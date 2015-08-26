@@ -8,7 +8,7 @@ import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfigur
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 
-object ChatClient {
+object Client {
   type User = String
   object Messages {
     case class Connect(username: String, password: String)
@@ -25,8 +25,8 @@ object ChatClient {
 }
 
 class ChatActor extends Actor {
-  import ChatClient._
-  import ChatClient.Messages._
+  import Client._
+  import Client.Messages._
   import context._
 
   var connection: XMPPTCPConnection = _
@@ -94,7 +94,7 @@ class ChatActor extends Actor {
       XMPPTCPConnectionConfiguration.builder
       .setUsernameAndPassword(connect.username, connect.password)
       .setServiceName("corp")
-      .setHost(ChatClient.host)
+      .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
       .build
     )

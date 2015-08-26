@@ -5,8 +5,7 @@ import scala.collection.JavaConversions._
 
 // this test depends on a running xmpp server (e.g. ejabberd) in your environment!
 @tags.RequiresEjabberd
-class MessagingClientTest extends WordSpec with Matchers {
-
+class ClientTest extends WordSpec with Matchers {
 
   "connects" in new Fixture {
   }
@@ -18,4 +17,3 @@ class MessagingClientTest extends WordSpec with Matchers {
   trait Fixture {
   }
 }
-
