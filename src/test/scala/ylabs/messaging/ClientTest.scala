@@ -2,12 +2,14 @@ package ylabs.messaging
 
 import akka.actor.ActorSystem
 import akka.actor.Props
+import akka.testkit.TestProbe
 import akka.util.Timeout
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.{ Matchers, WordSpec }
 import scala.collection.JavaConversions._
 import akka.testkit.TestActorRef
 import Client.Messages._
+import Client.MessageReceived
 import akka.pattern.ask
 import concurrent.duration._
 import scala.util.Success
@@ -30,17 +32,23 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     client1 ! Disconnect
   }
 
-  "chats to other users" in new Fixture {
+  "chats to other users" taggedAs (org.scalatest.Tag("foo")) in new Fixture {
+    val messageListener = TestProbe()
+    client2 ! RegisterMessageListener(messageListener.ref)
+
     client1 ! Connect(user1, pass1)
     client2 ! Connect(user2, pass2)
-
     client1 ! ChatTo(user2)
+    val testMessage = "test message"
+    client1 ! SendMessage(user2, testMessage)
 
-    val message = "test message"
-    client1 ! SendMessage(user2, message)
-
-    // TODO: await message at client 2
-    Thread.sleep(1000)
+    messageListener.expectMsgPF(3 seconds, "expected message to be delivered") {
+      case MessageReceived(chat, message) ⇒
+        chat.getParticipant shouldBe s"$user1@${Client.domain}/Smack"
+        message.getTo shouldBe s"$user2@${Client.domain}"
+        message.getBody shouldBe testMessage
+        true
+    }
 
     client1 ! Disconnect
     client2 ! Disconnect

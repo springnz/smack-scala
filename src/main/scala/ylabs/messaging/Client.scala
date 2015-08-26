@@ -1,5 +1,6 @@
 package ylabs.messaging
 
+import akka.actor.ActorRef
 import akka.actor.{ Actor, ActorSystem }
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.chat._
@@ -10,19 +11,25 @@ import scala.collection.mutable
 
 object Client {
   type User = String
+
   object Messages {
+    case class RegisterMessageListener(actor: ActorRef)
+
     case class Connect(username: String, password: String)
     object Connected
 
     case class ChatTo(otherUser: User)
     case class SendMessage(otherUser: User, message: String)
     case class LeaveChat(otherUser: User)
+
     object Disconnect
     object Shutdown
   }
+
+  case class MessageReceived(chat: Chat, message: Message)
+
   val domain = "corp"
   val host = "akllap015.corp"
-
   def computerSays(s: String) = println(s">> $s")
 }
 
@@ -34,6 +41,7 @@ class Client extends Actor {
   var connection: XMPPTCPConnection = _
   var chatManager: ChatManager = _
   val chats = mutable.Map.empty[User, Chat]
+  val messageListeners = mutable.ArrayBuffer.empty[ActorRef]
 
   override def receive = {
     case c: Connect ⇒
@@ -42,6 +50,7 @@ class Client extends Actor {
       become(connected)
 
     case Shutdown ⇒ context.system.shutdown()
+    case RegisterMessageListener(actor) => messageListeners += actor
     case _        ⇒ computerSays("not connected!")
   }
 
@@ -60,6 +69,7 @@ class Client extends Actor {
       self ! Shutdown
 
     case Connect ⇒ computerSays("already connected!")
+    case RegisterMessageListener(actor) => messageListeners += actor
     case _       ⇒ computerSays("connected, but not in chat!")
   }
 
@@ -89,6 +99,7 @@ class Client extends Actor {
       self ! Disconnect
       self ! Shutdown
 
+    case RegisterMessageListener(actor) => messageListeners += actor
     case Connect ⇒ computerSays("already connected!")
   }
 
@@ -129,6 +140,7 @@ class Client extends Actor {
   def printingMessageListener = new ChatMessageListener {
     override def processMessage(chat: Chat, message: Message): Unit = {
       computerSays(s"ChatMessageListener: received message for $chat : $message")
+      messageListeners foreach { _ ! MessageReceived(chat, message) }
     }
   }
 }
