@@ -39,11 +39,11 @@ object Client {
 
   val domain = "corp"
   val host = "akllap015.corp"
-  def computerSays(s: String) = println(s">> $s")
 }
 
 class Client extends FSM[State, Context] {
   startWith(Unconnected, Context(None, None, Map.empty, Seq.empty))
+  // val log = LoggerFactory.getLogger(getClass)
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
@@ -58,7 +58,7 @@ class Client extends FSM[State, Context] {
 
   when(Connected) {
     case Event(Messages.ChatTo(name), ctx) ⇒
-      computerSays(s"creating chat to $name")
+      log.info(s"creating chat to $name")
       val chat = chatTo(ctx.chatManager.get, name)
       stay using ctx.copy(chats = ctx.chats + (name → chat))
 
@@ -73,8 +73,8 @@ class Client extends FSM[State, Context] {
       ctx.chats.get(otherUser) match {
         case Some(chat) ⇒
           chat.sendMessage(message)
-          computerSays(s"message sent to $otherUser")
-        case None ⇒ computerSays(s"no chat with user $otherUser found!")
+          log.info(s"message sent to $otherUser")
+        case None ⇒ log.error(s"no chat with user $otherUser found!")
       }
       stay
 
@@ -82,10 +82,10 @@ class Client extends FSM[State, Context] {
       ctx.chats.get(otherUser) match {
         case Some(chat) ⇒
           chat.close()
-          computerSays(s"left chat with $otherUser")
+          log.info(s"left chat with $otherUser")
           stay using ctx.copy(chats = ctx.chats - otherUser)
         case _ ⇒
-          computerSays(s"no chat open with user $otherUser")
+          log.warning(s"no chat open with user $otherUser")
           stay
       }
 
@@ -111,18 +111,18 @@ class Client extends FSM[State, Context] {
     val chatManager = ChatManager.getInstanceFor(connection)
     chatManager.addChatListener(new ChatManagerListener {
       override def chatCreated(chat: Chat, createdLocally: Boolean): Unit = {
-        computerSays(s"ChatManagerListener: chat created: $chat; locally: $createdLocally")
+        log.info(s"ChatManagerListener: chat created: $chat; locally: $createdLocally")
         chat.addMessageListener(chatMessageListener)
       }
     })
-    computerSays("connected")
+    log.info("connected")
     chatManager
   }
 
   def disconnect(ctx: Context): Unit = {
     ctx.chats.values.foreach(_.close())
     ctx.connection.foreach(_.disconnect())
-    computerSays("disconnected")
+    log.info("disconnected")
   }
 
   def chatTo(chatManager: ChatManager, otherUser: User): Chat = {
@@ -133,7 +133,7 @@ class Client extends FSM[State, Context] {
 
   val chatMessageListener = new ChatMessageListener {
     override def processMessage(chat: Chat, message: Message): Unit = {
-      computerSays(s"ChatMessageListener: received message for $chat : $message")
+      log.debug(s"ChatMessageListener: received message for $chat : $message")
       self ! Messages.MessageReceived(chat, message)
     }
   }

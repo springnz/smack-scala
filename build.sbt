@@ -13,7 +13,9 @@ libraryDependencies ++= Seq(
   "org.igniterealtime.smack" % "smack-im" % smackVersion,
   "org.igniterealtime.smack" % "smack-extensions" % smackVersion,
   "com.typesafe.akka" %% "akka-actor" % akkaVersion,
+  "com.typesafe.akka" %% "akka-slf4j" % akkaVersion,
   "com.typesafe.akka" %% "akka-testkit" % akkaVersion % Test,
+  "ch.qos.logback" % "logback-classic" % "1.1.3",
   "org.scalatest" %% "scalatest" % "2.2.4" % Test,
 
   // to avoid version conflicts in transitive deps:
