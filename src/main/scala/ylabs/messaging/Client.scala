@@ -12,6 +12,8 @@ object Client {
   type User = String
   object Messages {
     case class Connect(username: String, password: String)
+    object Connected
+
     case class ChatTo(otherUser: User)
     case class SendMessage(otherUser: User, message: String)
     case class LeaveChat(otherUser: User)
@@ -24,7 +26,7 @@ object Client {
   def computerSays(s: String) = println(s">> $s")
 }
 
-class ChatActor extends Actor {
+class Client extends Actor {
   import Client._
   import Client.Messages._
   import context._
@@ -36,6 +38,7 @@ class ChatActor extends Actor {
   override def receive = {
     case c: Connect ⇒
       connect(c)
+      sender ! Connected
       become(connected)
 
     case Shutdown ⇒ context.system.shutdown()

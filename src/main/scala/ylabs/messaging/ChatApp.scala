@@ -7,7 +7,7 @@ object ChatApp extends App {
   import Client.Messages._
 
   val system = ActorSystem()
-  val chattie = system.actorOf(Props[ChatActor], "chatClient")
+  val chattie = system.actorOf(Props[Client], "chatClient")
 
   var on = true
   computerSays("What now?")
