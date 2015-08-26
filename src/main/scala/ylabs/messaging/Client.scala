@@ -1,16 +1,26 @@
 package ylabs.messaging
 
-import akka.actor.ActorRef
-import akka.actor.{ Actor, ActorSystem }
+import Client._
+import akka.actor.{ Actor, ActorRef, FSM }
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet.Message
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import scala.collection.JavaConversions._
-import scala.collection.mutable
 
 object Client {
   type User = String
+
+  sealed trait State
+  case object Unconnected extends State
+  case object Connected extends State
+
+  case class Context(
+    connection: Option[XMPPTCPConnection],
+    chatManager: Option[ChatManager],
+    chats: Map[User, Chat],
+    messageListeners: Seq[ActorRef]
+  )
 
   object Messages {
     case class RegisterMessageListener(actor: ActorRef)
@@ -18,130 +28,116 @@ object Client {
     case class Connect(username: String, password: String)
     object Connected
 
+    object Disconnect
+
     case class ChatTo(otherUser: User)
     case class SendMessage(otherUser: User, message: String)
     case class LeaveChat(otherUser: User)
 
-    object Disconnect
-    object Shutdown
+    case class MessageReceived(chat: Chat, message: Message)
   }
-
-  case class MessageReceived(chat: Chat, message: Message)
 
   val domain = "corp"
   val host = "akllap015.corp"
   def computerSays(s: String) = println(s">> $s")
 }
 
-class Client extends Actor {
-  import Client._
-  import Client.Messages._
-  import context._
+class Client extends FSM[State, Context] {
+  startWith(Unconnected, Context(None, None, Map.empty, Seq.empty))
 
-  var connection: XMPPTCPConnection = _
-  var chatManager: ChatManager = _
-  val chats = mutable.Map.empty[User, Chat]
-  val messageListeners = mutable.ArrayBuffer.empty[ActorRef]
+  when(Unconnected) {
+    case Event(c: Messages.Connect, ctx) ⇒
+      val connection = connect(c.username, c.password)
+      val chatManager = setupChatManager(connection)
+      sender ! Messages.Connected
+      goto(Connected) using ctx.copy(connection = Some(connection), chatManager = Some(chatManager))
 
-  override def receive = {
-    case c: Connect ⇒
-      connect(c)
-      sender ! Connected
-      become(connected)
-
-    case Shutdown ⇒ context.system.shutdown()
-    case RegisterMessageListener(actor) => messageListeners += actor
-    case _        ⇒ computerSays("not connected!")
+    case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
+      stay using ctx.copy(messageListeners = ctx.messageListeners :+ actor)
   }
 
-  def connected: Receive = {
-    case ChatTo(name) ⇒
-      println(s"creating chat to $name")
-      chatTo(name)
-      become(inChat)
+  when(Connected) {
+    case Event(Messages.ChatTo(name), ctx) ⇒
+      computerSays(s"creating chat to $name")
+      val chat = chatTo(ctx.chatManager.get, name)
+      stay using ctx.copy(chats = ctx.chats + (name → chat))
 
-    case Disconnect ⇒
-      disconnect()
-      unbecome()
+    case Event(Messages.Disconnect, ctx) ⇒
+      disconnect(ctx)
+      goto(Unconnected) using ctx.copy(connection = None, chatManager = None, chats = Map.empty)
 
-    case Shutdown ⇒
-      self ! Disconnect
-      self ! Shutdown
+    case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
+      stay using ctx.copy(messageListeners = ctx.messageListeners :+ actor)
 
-    case Connect ⇒ computerSays("already connected!")
-    case RegisterMessageListener(actor) => messageListeners += actor
-    case _       ⇒ computerSays("connected, but not in chat!")
-  }
-
-  def inChat: Receive = {
-    case LeaveChat(otherUser) ⇒
-      chats.get(otherUser) match {
-        case Some(chat) ⇒
-          chat.close()
-          chats -= otherUser
-          computerSays(s"left chat with $otherUser")
-        case _ ⇒ computerSays(s"no chat open with user $otherUser")
-      }
-
-    case SendMessage(otherUser, message) ⇒
-      chats.get(otherUser) match {
+    case Event(Messages.SendMessage(otherUser, message), ctx) ⇒
+      ctx.chats.get(otherUser) match {
         case Some(chat) ⇒
           chat.sendMessage(message)
           computerSays(s"message sent to $otherUser")
         case None ⇒ computerSays(s"no chat with user $otherUser found!")
       }
+      stay
 
-    case Disconnect ⇒
-      disconnect()
-      unbecome()
+    case Event(Messages.LeaveChat(otherUser), ctx) ⇒
+      ctx.chats.get(otherUser) match {
+        case Some(chat) ⇒
+          chat.close()
+          computerSays(s"left chat with $otherUser")
+          stay using ctx.copy(chats = ctx.chats - otherUser)
+        case _ ⇒
+          computerSays(s"no chat open with user $otherUser")
+          stay
+      }
 
-    case Shutdown ⇒
-      self ! Disconnect
-      self ! Shutdown
-
-    case RegisterMessageListener(actor) => messageListeners += actor
-    case Connect ⇒ computerSays("already connected!")
+    case Event(msg: Messages.MessageReceived, ctx) ⇒
+      ctx.messageListeners foreach { _ ! msg }
+      stay
   }
 
-  def connect(connect: Connect) = {
-    connection = new XMPPTCPConnection(
+  def connect(username: String, password: String): XMPPTCPConnection = {
+    val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
-      .setUsernameAndPassword(connect.username, connect.password)
+      .setUsernameAndPassword(username, password)
       .setServiceName("corp")
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
       .build
     )
     connection.connect().login()
+    connection
+  }
 
-    chatManager = ChatManager.getInstanceFor(connection)
+  def setupChatManager(connection: XMPPTCPConnection): ChatManager = {
+    val chatManager = ChatManager.getInstanceFor(connection)
     chatManager.addChatListener(new ChatManagerListener {
       override def chatCreated(chat: Chat, createdLocally: Boolean): Unit = {
         computerSays(s"ChatManagerListener: chat created: $chat; locally: $createdLocally")
-        chat.addMessageListener(printingMessageListener)
+        chat.addMessageListener(chatMessageListener)
       }
     })
     computerSays("connected")
+    chatManager
   }
 
-  def disconnect() = {
-    chats.values.foreach(_.close())
-    chats.clear()
-    Option(connection).map(_.disconnect())
+  def disconnect(ctx: Context): Unit = {
+    ctx.chats.values.foreach(_.close())
+    ctx.connection.foreach(_.disconnect())
     computerSays("disconnected")
   }
 
-  def chatTo(otherUser: User): Unit = {
+  def chatTo(chatManager: ChatManager, otherUser: User): Chat = {
     val chat = chatManager.createChat(s"$otherUser@$domain")
-    chat.addMessageListener(printingMessageListener)
-    chats += otherUser → chat
+    chat.addMessageListener(chatMessageListener)
+    chat
   }
 
-  def printingMessageListener = new ChatMessageListener {
+  val chatMessageListener = new ChatMessageListener {
     override def processMessage(chat: Chat, message: Message): Unit = {
       computerSays(s"ChatMessageListener: received message for $chat : $message")
-      messageListeners foreach { _ ! MessageReceived(chat, message) }
+      self ! Messages.MessageReceived(chat, message)
     }
   }
+
+  initialize()
 }
 

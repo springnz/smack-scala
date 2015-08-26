@@ -43,7 +43,7 @@ object ChatApp extends App {
 
       case "exit" ⇒
         computerSays("shutting down")
-        chattie ! Shutdown
+        system.shutdown()
         on = false
 
       case _ ⇒ computerSays("Que? No comprendo. Try again, sir!")

@@ -1,17 +1,13 @@
 package ylabs.messaging
 
-import akka.actor.ActorSystem
-import akka.actor.Props
-import akka.testkit.TestProbe
-import akka.util.Timeout
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.{ Matchers, WordSpec }
-import scala.collection.JavaConversions._
-import akka.testkit.TestActorRef
 import Client.Messages._
-import Client.MessageReceived
+import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
-import concurrent.duration._
+import akka.testkit.{ TestActorRef, TestProbe }
+import akka.util.Timeout
+import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
+import scala.collection.JavaConversions._
+import scala.concurrent.duration._
 import scala.util.Success
 
 // this test depends on a running xmpp server (e.g. ejabberd) in your environment!
@@ -32,7 +28,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     client1 ! Disconnect
   }
 
-  "chats to other users" taggedAs (org.scalatest.Tag("foo")) in new Fixture {
+  "chats to other users" in new Fixture {
     val messageListener = TestProbe()
     client2 ! RegisterMessageListener(messageListener.ref)
 
