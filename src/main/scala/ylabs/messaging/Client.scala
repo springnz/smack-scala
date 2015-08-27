@@ -35,10 +35,12 @@ object Client {
 
   object Messages {
     case class RegisterUser(username: User, password: Password)
+    object DeleteUser
     case class RegisterMessageListener(actor: ActorRef)
 
     case class Connect(username: String, password: String)
     object Connected
+    case class ConnectError(t: Throwable)
 
     object Disconnect
 
@@ -59,10 +61,20 @@ class Client extends FSM[State, Context] {
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
-      val connection = connect(c.username, c.password)
-      val chatManager = setupChatManager(connection)
-      sender ! Messages.Connected
-      goto(Connected) using ctx.copy(connection = Some(connection), chatManager = Some(chatManager))
+      Try {
+        val connection = connect(c.username, c.password)
+        val chatManager = setupChatManager(connection)
+        (connection, chatManager)
+      } match {
+        case Success((connection, chatManager)) ⇒
+          log.info(s"user ${c.username} successfully connected")
+          sender ! Messages.Connected
+          goto(Connected) using ctx.copy(connection = Some(connection), chatManager = Some(chatManager))
+        case Failure(t) ⇒
+          log.error(t, s"unable to connect as user ${c.username}")
+          sender ! Messages.ConnectError(t)
+          stay
+      }
 
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
       stay using ctx.copy(messageListeners = ctx.messageListeners :+ actor)
@@ -113,8 +125,19 @@ class Client extends FSM[State, Context] {
       } match {
         case Success(s) ⇒ log.info(s"user ${register.username} successfully created")
         case Failure(t) ⇒ log.error(t, s"could not register user ${register.username}!")
-          log.error(t.getMessage) // TODO: remove me
       }
+      stay
+
+    case Event(Messages.DeleteUser, ctx) if ctx.connection.isDefined ⇒
+      log.info(s"trying to delete user")
+      val accountManager = AccountManager.getInstance(ctx.connection.get)
+      Try {
+        accountManager.deleteAccount()
+      } match {
+        case Success(s) ⇒ log.info(s"user successfully deleted")
+        case Failure(t) ⇒ log.error(t, s"could not delete user!")
+      }
+      self ! Messages.Disconnect
       stay
   }
 

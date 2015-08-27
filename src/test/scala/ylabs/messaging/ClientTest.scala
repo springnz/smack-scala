@@ -5,42 +5,46 @@ import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
 import akka.testkit.{ TestActorRef, TestProbe }
 import akka.util.Timeout
+import java.util.UUID
 import org.jivesoftware.smackx.iqregister.packet.Registration
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
+import scala.util.Failure
 import scala.util.Success
 
-// this test depends on a running xmpp server (e.g. ejabberd) with certain users in your environment!
+// this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
+// see http://docs.ejabberd.im/admin/guide/configuration/#modregister for more details
 @tags.RequiresEjabberd
 class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   implicit var system: ActorSystem = _
   implicit val timeout = Timeout(5 seconds)
 
-  val domain = "corp"
-  val host = "akllap015.corp"
-  val adminUsername = "admin4"
-  val adminPassword = "admin4"
-  // val user1 = "admin4"
-  // val pass1 = "admin4"
-  // val user2 = "admin5"
-  // val pass2 = "admin5"
+  val adminUsername = "admin"
+  val adminPassword = "admin"
+  def randomUsername = s"testuser-${UUID.randomUUID.toString.substring(9)}"
 
-  "registers a user" in new Fixture {
-    adminUser ! Connect(adminUsername, adminPassword)
-    // val reg = new Registration(Map("name" -> "test1"))
-    adminUser ! RegisterUser("test1", "test1")
-    // adminUser ! RegisterUser("test1@corp", "test1")
-    Thread.sleep(1000)
-
-    // val a: org.jivesoftware.smackx.iqregister.AccountManager = ???
+  "connects to the xmpp server" in new Fixture {
+    val connected = adminUser ? Connect(adminUsername, adminPassword)
+    connected.value.get shouldBe Success(Connected)
+    adminUser ! Disconnect
   }
 
-  // "connects to the xmpp server" in new Fixture {
-  //   val connected = client1 ? Connect(user1, pass1)
-  //   connected.value.get shouldBe Success(Connected)
-  //   client1 ! Disconnect
-  // }
+  "user registration and deletion" in new Fixture {
+    val user = randomUsername
+
+    adminUser ! Connect(adminUsername, adminPassword)
+    adminUser ! RegisterUser(user, password = user)
+
+    val connected1 = user1 ? Connect(user, password = user)
+    connected1.value.get shouldBe Success(Connected)
+
+    user1 ! DeleteUser
+    val connected2 = user1 ? Connect(user, password = user)
+    connected2.value.get.get match {
+      case ConnectError(t) => //that's all we want to check
+    }
+  }
 
   // "chats to other users" in new Fixture {
   //   val messageListener = TestProbe()
@@ -92,8 +96,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   trait Fixture {
     val adminUser = TestActorRef(Props[Client])
-    val client1 = TestActorRef(Props[Client])
-    // val client2 = TestActorRef(Props[Client])
+    val user1 = TestActorRef(Props[Client])
+    val user2 = TestActorRef(Props[Client])
+
+    // def withOneUser(block: () => Unit): Unit {
+
+    // }
   }
 
   override def beforeEach() {
