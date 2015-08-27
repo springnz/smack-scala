@@ -75,31 +75,39 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     user2 ! DeleteUser
   }
 
-  // "allows async chats" in new Fixture {
-  //   val messageListener = TestProbe()
-  //   client2 ! RegisterMessageListener(messageListener.ref)
+  "enables async chats (message recipient offline)" in new Fixture {
+    val username1 = randomUsername
+    val username2 = randomUsername
 
-  //   client1 ! Connect(user1, pass1)
-  //   // client2 is not connected
-  //   client1 ! ChatTo(user2)
-  //   val testMessage = "async test message"
-  //   client1 ! SendMessage(user2, testMessage)
+    adminUser ! Connect(adminUsername, adminPassword)
+    adminUser ! RegisterUser(username1, password = username1)
+    adminUser ! RegisterUser(username2, password = username2)
 
-  //   // sleep is bad, but I dunno how else to make this guaranteed async. 
-  //   Thread.sleep(1000)
-  //   client2 ! Connect(user2, pass2)
+    user1 ! Connect(username1, password = username1)
 
-  //   messageListener.expectMsgPF(3 seconds, "expected message to be delivered") {
-  //     case MessageReceived(chat, message) ⇒
-  //       chat.getParticipant shouldBe s"$user1@$domain/Smack"
-  //       message.getTo shouldBe s"$user2@$domain"
-  //       message.getBody shouldBe testMessage
-  //       true
-  //   }
+    val messageListener = TestProbe()
+    user2 ! RegisterMessageListener(messageListener.ref)
 
-  //   client1 ! Disconnect
-  //   client2 ! Disconnect
-  // }
+    user1 ! ChatTo(username2)
+    val testMessage = "unique test message" + UUID.randomUUID
+    user1 ! SendMessage(username2, testMessage)
+
+    // sleep is bad, but I dunno how else to make this guaranteed async. 
+    Thread.sleep(1000)
+    user2 ! Connect(username2, password = username2)
+
+    messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
+      case MessageReceived(chat, message) if !message.getBody.contains("Welcome") ⇒
+        chat.getParticipant should startWith(username1)
+        message.getTo should startWith(username2)
+        message.getBody shouldBe testMessage
+        true
+      case _ ⇒ false
+    }
+
+    user1 ! DeleteUser
+    user2 ! DeleteUser
+  }
 
   trait Fixture {
     val adminUser = TestActorRef(Props[Client])
