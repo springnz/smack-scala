@@ -1,6 +1,7 @@
 package ylabs.messaging
 
 import Client.Messages._
+import Client.User
 import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
 import akka.testkit.{ TestActorRef, TestProbe }
@@ -9,7 +10,7 @@ import java.util.UUID
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
-import scala.util.Success
+import scala.util.{ Success, Try }
 
 // this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
 // see http://docs.ejabberd.im/admin/guide/configuration/#modregister for more details
@@ -45,68 +46,52 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   "enables users to chat to each other" in new Fixture {
-    val username1 = randomUsername
-    val username2 = randomUsername
+    withTwoUsers { (username1, username2) ⇒
+      user1 ! Connect(username1, password = username1)
+      user2 ! Connect(username2, password = username2)
 
-    adminUser ! Connect(adminUsername, adminPassword)
-    adminUser ! RegisterUser(username1, password = username1)
-    adminUser ! RegisterUser(username2, password = username2)
+      val messageListener = TestProbe()
+      user2 ! RegisterMessageListener(messageListener.ref)
 
-    user1 ! Connect(username1, password = username1)
-    user2 ! Connect(username2, password = username2)
+      user1 ! ChatTo(username2)
+      val testMessage = "unique test message" + UUID.randomUUID
+      user1 ! SendMessage(username2, testMessage)
 
-    val messageListener = TestProbe()
-    user2 ! RegisterMessageListener(messageListener.ref)
-
-    user1 ! ChatTo(username2)
-    val testMessage = "unique test message" + UUID.randomUUID
-    user1 ! SendMessage(username2, testMessage)
-
-    messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
-      case MessageReceived(chat, message) if !message.getBody.contains("Welcome") ⇒
-        chat.getParticipant should startWith(username1)
-        message.getTo should startWith(username2)
-        message.getBody shouldBe testMessage
-        true
-      case _ ⇒ false
+      messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
+        case MessageReceived(chat, message) if !message.getBody.contains("Welcome") ⇒
+          chat.getParticipant should startWith(username1)
+          message.getTo should startWith(username2)
+          message.getBody shouldBe testMessage
+          true
+        case _ ⇒ false
+      }
     }
-
-    user1 ! DeleteUser
-    user2 ! DeleteUser
   }
 
   "enables async chats (message recipient offline)" in new Fixture {
-    val username1 = randomUsername
-    val username2 = randomUsername
+    withTwoUsers { (username1, username2) ⇒
+      user1 ! Connect(username1, password = username1)
 
-    adminUser ! Connect(adminUsername, adminPassword)
-    adminUser ! RegisterUser(username1, password = username1)
-    adminUser ! RegisterUser(username2, password = username2)
+      val messageListener = TestProbe()
+      user2 ! RegisterMessageListener(messageListener.ref)
 
-    user1 ! Connect(username1, password = username1)
+      user1 ! ChatTo(username2)
+      val testMessage = "unique test message" + UUID.randomUUID
+      user1 ! SendMessage(username2, testMessage)
 
-    val messageListener = TestProbe()
-    user2 ! RegisterMessageListener(messageListener.ref)
+      // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
+      Thread.sleep(1000)
+      user2 ! Connect(username2, password = username2)
 
-    user1 ! ChatTo(username2)
-    val testMessage = "unique test message" + UUID.randomUUID
-    user1 ! SendMessage(username2, testMessage)
-
-    // sleep is bad, but I dunno how else to make this guaranteed async. 
-    Thread.sleep(1000)
-    user2 ! Connect(username2, password = username2)
-
-    messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
-      case MessageReceived(chat, message) if !message.getBody.contains("Welcome") ⇒
-        chat.getParticipant should startWith(username1)
-        message.getTo should startWith(username2)
-        message.getBody shouldBe testMessage
-        true
-      case _ ⇒ false
+      messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
+        case MessageReceived(chat, message) if !message.getBody.contains("Welcome") ⇒
+          chat.getParticipant should startWith(username1)
+          message.getTo should startWith(username2)
+          message.getBody shouldBe testMessage
+          true
+        case _ ⇒ false
+      }
     }
-
-    user1 ! DeleteUser
-    user2 ! DeleteUser
   }
 
   trait Fixture {
@@ -114,9 +99,21 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     val user1 = TestActorRef(Props[Client])
     val user2 = TestActorRef(Props[Client])
 
-    // def withOneUser(block: () => Unit): Unit {
+    def withTwoUsers(block: (User, User) ⇒ Unit): Unit = {
+      val username1 = randomUsername
+      val username2 = randomUsername
 
-    // }
+      adminUser ! Connect(adminUsername, adminPassword)
+      adminUser ! RegisterUser(username1, password = username1)
+      adminUser ! RegisterUser(username2, password = username2)
+
+      try {
+        block(username1, username2)
+      } finally {
+        user1 ! DeleteUser
+        user2 ! DeleteUser
+      }
+    }
   }
 
   override def beforeEach() {

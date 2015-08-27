@@ -9,9 +9,7 @@ import org.jivesoftware.smack.packet.Message
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
 import scala.collection.JavaConversions._
-import scala.util.Failure
-import scala.util.Success
-import scala.util.Try
+import scala.util.{ Failure, Success, Try }
 
 object Client {
   object ConfigKeys {
