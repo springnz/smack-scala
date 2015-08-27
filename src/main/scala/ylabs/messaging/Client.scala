@@ -7,7 +7,11 @@ import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet.Message
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
+import org.jivesoftware.smackx.iqregister.AccountManager
 import scala.collection.JavaConversions._
+import scala.util.Failure
+import scala.util.Success
+import scala.util.Try
 
 object Client {
   object ConfigKeys {
@@ -16,6 +20,7 @@ object Client {
   }
 
   type User = String
+  type Password = String
 
   sealed trait State
   case object Unconnected extends State
@@ -29,6 +34,7 @@ object Client {
   )
 
   object Messages {
+    case class RegisterUser(username: User, password: Password)
     case class RegisterMessageListener(actor: ActorRef)
 
     case class Connect(username: String, password: String)
@@ -63,7 +69,7 @@ class Client extends FSM[State, Context] {
   }
 
   when(Connected) {
-    case Event(Messages.ChatTo(name), ctx) ⇒
+    case Event(Messages.ChatTo(name), ctx) if ctx.chatManager.isDefined ⇒
       log.info(s"creating chat to $name")
       val chat = chatTo(ctx.chatManager.get, name)
       stay using ctx.copy(chats = ctx.chats + (name → chat))
@@ -97,6 +103,18 @@ class Client extends FSM[State, Context] {
 
     case Event(msg: Messages.MessageReceived, ctx) ⇒
       ctx.messageListeners foreach { _ ! msg }
+      stay
+
+    case Event(register: Messages.RegisterUser, ctx) if ctx.connection.isDefined ⇒
+      log.info(s"trying to register user ${register.username}")
+      val accountManager = AccountManager.getInstance(ctx.connection.get)
+      Try {
+        accountManager.createAccount(register.username, register.password)
+      } match {
+        case Success(s) ⇒ log.info(s"user ${register.username} successfully created")
+        case Failure(t) ⇒ log.error(t, s"could not register user ${register.username}!")
+          log.error(t.getMessage) // TODO: remove me
+      }
       stay
   }
 
