@@ -16,7 +16,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   implicit var system: ActorSystem = _
   implicit val timeout = Timeout(5 seconds)
 
-  // TODO: hand host and domain into client
+  val domain = "corp"
+  val host = "akllap015.corp"
   val user1 = "admin4"
   val pass1 = "admin4"
   val user2 = "admin5"
@@ -40,8 +41,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     messageListener.expectMsgPF(3 seconds, "expected message to be delivered") {
       case MessageReceived(chat, message) ⇒
-        chat.getParticipant shouldBe s"$user1@${Client.domain}/Smack"
-        message.getTo shouldBe s"$user2@${Client.domain}"
+        chat.getParticipant shouldBe s"$user1@$domain/Smack"
+        message.getTo shouldBe s"$user2@$domain"
         message.getBody shouldBe testMessage
         true
     }

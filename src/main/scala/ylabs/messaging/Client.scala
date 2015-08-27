@@ -2,6 +2,7 @@ package ylabs.messaging
 
 import Client._
 import akka.actor.{ Actor, ActorRef, FSM }
+import com.typesafe.config.ConfigFactory
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet.Message
@@ -9,6 +10,11 @@ import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfigur
 import scala.collection.JavaConversions._
 
 object Client {
+  object ConfigKeys {
+    val domain = "messaging.domain"
+    val host = "messaging.host"
+  }
+
   type User = String
 
   sealed trait State
@@ -36,14 +42,14 @@ object Client {
 
     case class MessageReceived(chat: Chat, message: Message)
   }
-
-  val domain = "corp"
-  val host = "akllap015.corp"
 }
 
 class Client extends FSM[State, Context] {
   startWith(Unconnected, Context(None, None, Map.empty, Seq.empty))
-  // val log = LoggerFactory.getLogger(getClass)
+
+  lazy val config = ConfigFactory.load()
+  lazy val domain = config.getString(ConfigKeys.domain)
+  lazy val host = config.getString(ConfigKeys.host)
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
@@ -98,7 +104,7 @@ class Client extends FSM[State, Context] {
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
       .setUsernameAndPassword(username, password)
-      .setServiceName("corp")
+      .setServiceName(domain)
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
       .build
