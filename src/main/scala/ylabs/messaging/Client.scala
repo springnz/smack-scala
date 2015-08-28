@@ -66,7 +66,6 @@ class Client extends FSM[State, Context] {
       } match {
         case Success((connection, chatManager)) ⇒
           log.info(s"user ${c.username} successfully connected")
-          sender ! Messages.Connected
           goto(Connected) using ctx.copy(connection = Some(connection), chatManager = Some(chatManager))
         case Failure(t) ⇒
           log.error(t, s"unable to connect as user ${c.username}")
@@ -76,6 +75,11 @@ class Client extends FSM[State, Context] {
 
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
       stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
+  }
+
+  onTransition {
+    case Unconnected -> Connected =>
+      sender ! Messages.Connected
   }
 
   when(Connected) {
