@@ -28,7 +28,7 @@ object Client {
     connection: Option[XMPPTCPConnection],
     chatManager: Option[ChatManager],
     chats: Map[User, Chat],
-    messageListeners: Seq[ActorRef]
+    messageListeners: Set[ActorRef]
   )
 
   object Messages {
@@ -51,7 +51,7 @@ object Client {
 }
 
 class Client extends FSM[State, Context] {
-  startWith(Unconnected, Context(None, None, Map.empty, Seq.empty))
+  startWith(Unconnected, Context(None, None, Map.empty, Set.empty))
 
   lazy val config = ConfigFactory.load()
   lazy val domain = config.getString(ConfigKeys.domain)
@@ -75,7 +75,7 @@ class Client extends FSM[State, Context] {
       }
 
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
-      stay using ctx.copy(messageListeners = ctx.messageListeners :+ actor)
+      stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
   }
 
   when(Connected) {
@@ -89,7 +89,7 @@ class Client extends FSM[State, Context] {
       goto(Unconnected) using ctx.copy(connection = None, chatManager = None, chats = Map.empty)
 
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
-      stay using ctx.copy(messageListeners = ctx.messageListeners :+ actor)
+      stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
 
     case Event(Messages.SendMessage(otherUser, message), ctx) ⇒
       ctx.chats.get(otherUser) match {
