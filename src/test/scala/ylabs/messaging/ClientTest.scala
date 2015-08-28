@@ -57,14 +57,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       val testMessage = "unique test message" + UUID.randomUUID
       user1 ! SendMessage(username2, testMessage)
 
-      messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
-        case MessageReceived(chat, message) if !message.getBody.contains("Welcome") ⇒
-          chat.getParticipant should startWith(username1)
-          message.getTo should startWith(username2)
-          message.getBody shouldBe testMessage
-          true
-        case _ ⇒ false
-      }
+      verifyMessageArrived(messageListener, username1, username2, testMessage)
     }
   }
 
@@ -83,14 +76,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       Thread.sleep(1000)
       user2 ! Connect(username2, password = username2)
 
-      messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
-        case MessageReceived(chat, message) if !message.getBody.contains("Welcome") ⇒
-          chat.getParticipant should startWith(username1)
-          message.getTo should startWith(username2)
-          message.getBody shouldBe testMessage
-          true
-        case _ ⇒ false
-      }
+      verifyMessageArrived(messageListener, username1, username2, testMessage)
     }
   }
 
@@ -112,6 +98,17 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       } finally {
         user1 ! DeleteUser
         user2 ! DeleteUser
+      }
+    }
+
+    def verifyMessageArrived(messageListener: TestProbe, sender: User, recipient: User, messageBody: String): Unit = {
+      messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
+        case MessageReceived(chat, message) if !message.getBody.contains("Welcome") ⇒
+          chat.getParticipant should startWith(sender)
+          message.getTo should startWith(recipient)
+          message.getBody shouldBe messageBody
+          true
+        case _ ⇒ false
       }
     }
   }
