@@ -1,6 +1,7 @@
 package ylabs.messaging
 
 import Client._
+import OutOfBandData._
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
@@ -42,9 +43,10 @@ object Client {
 
     object Disconnect
 
-    case class ChatTo(otherUser: User)
-    case class SendMessage(otherUser: User, message: String)
-    case class LeaveChat(otherUser: User)
+    case class ChatTo(recipient: User)
+    case class SendMessage(recipient: User, message: String)
+    case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
+    case class LeaveChat(recipient: User)
 
     case class MessageReceived(chat: Chat, message: Message)
   }
@@ -78,16 +80,13 @@ class Client extends FSM[State, Context] {
   }
 
   onTransition {
-    case Unconnected -> Connected =>
+    // format: OFF
+    case Unconnected -> Connected ⇒
       sender ! Messages.Connected
+    // format: ON
   }
 
   when(Connected) {
-    case Event(Messages.ChatTo(name), ctx) if ctx.chatManager.isDefined ⇒
-      log.info(s"creating chat to $name")
-      val chat = chatTo(ctx.chatManager.get, name)
-      stay using ctx.copy(chats = ctx.chats + (name → chat))
-
     case Event(Messages.Disconnect, ctx) ⇒
       disconnect(ctx)
       goto(Unconnected) using ctx.copy(connection = None, chatManager = None, chats = Map.empty)
@@ -95,28 +94,47 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
       stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
 
-    case Event(Messages.SendMessage(otherUser, message), ctx) ⇒
-      ctx.chats.get(otherUser) match {
-        case Some(chat) ⇒
-          chat.sendMessage(message)
-          log.info(s"message sent to $otherUser")
-        case None ⇒ log.error(s"no chat with user $otherUser found!")
-      }
-      stay
+    case Event(Messages.ChatTo(name), ctx) if ctx.chatManager.isDefined ⇒
+      log.info(s"creating chat to $name")
+      val chat = chatTo(ctx.chatManager.get, name)
+      stay using ctx.copy(chats = ctx.chats + (name → chat))
 
-    case Event(Messages.LeaveChat(otherUser), ctx) ⇒
-      ctx.chats.get(otherUser) match {
+    case Event(Messages.LeaveChat(recipient), ctx) ⇒
+      ctx.chats.get(recipient) match {
         case Some(chat) ⇒
           chat.close()
-          log.info(s"left chat with $otherUser")
-          stay using ctx.copy(chats = ctx.chats - otherUser)
+          log.info(s"left chat with $recipient")
+          stay using ctx.copy(chats = ctx.chats - recipient)
         case _ ⇒
-          log.warning(s"no chat open with user $otherUser")
+          log.warning(s"no chat open with user $recipient")
           stay
       }
 
     case Event(msg: Messages.MessageReceived, ctx) ⇒
       ctx.messageListeners foreach { _ ! msg }
+      stay
+
+    case Event(Messages.SendMessage(recipient, message), ctx) ⇒
+      ctx.chats.get(recipient) match {
+        case Some(chat) ⇒
+          chat.sendMessage(message)
+          log.info(s"message sent to $recipient")
+        case None ⇒ log.error(s"no chat with user $recipient found!")
+      }
+      stay
+
+    case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
+      ctx.chats.get(recipient) match {
+        case Some(chat) ⇒
+          val fileInformation = OutOfBandData(fileUrl, description)
+          val infoText = "This message contains a link to a file, your client needs to " +
+            "implement XEP-0066. If you don't see the file, kindly ask the client developer."
+          val message = new Message(recipient, infoText)
+          message.addExtension(fileInformation)
+          chat.sendMessage(message)
+          log.info(s"file message sent to $recipient")
+        case None ⇒ log.error(s"no chat with user $recipient found!")
+      }
       stay
 
     case Event(register: Messages.RegisterUser, ctx) if ctx.connection.isDefined ⇒
@@ -141,6 +159,7 @@ class Client extends FSM[State, Context] {
       }
       self ! Messages.Disconnect
       stay
+
   }
 
   def connect(username: String, password: String): XMPPTCPConnection = {
@@ -164,7 +183,6 @@ class Client extends FSM[State, Context] {
         chat.addMessageListener(chatMessageListener)
       }
     })
-    log.info("connected")
     chatManager
   }
 
@@ -174,8 +192,8 @@ class Client extends FSM[State, Context] {
     log.info("disconnected")
   }
 
-  def chatTo(chatManager: ChatManager, otherUser: User): Chat = {
-    val chat = chatManager.createChat(s"$otherUser@$domain")
+  def chatTo(chatManager: ChatManager, recipient: User): Chat = {
+    val chat = chatManager.createChat(s"$recipient@$domain")
     chat.addMessageListener(chatMessageListener)
     chat
   }
