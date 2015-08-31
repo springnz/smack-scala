@@ -11,7 +11,7 @@ import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
 import scala.util.{ Success, Try }
-import Client.User
+import Client.{User, Password}
 
 // this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
 // see http://docs.ejabberd.im/admin/guide/configuration/#modregister for more details
@@ -22,34 +22,34 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   val adminUsername = "admin"
   val adminPassword = "admin"
-  def randomUsername = s"testuser-${UUID.randomUUID.toString.substring(9)}"
 
   "connects to the xmpp server" in new Fixture {
-    val connected = adminUser ? Connect(adminUsername, adminPassword)
+    val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
     connected.value.get shouldBe Success(Connected)
     adminUser ! Disconnect
   }
 
   "allows user registration and deletion" in new Fixture {
     val username = randomUsername
+    val userPass = Password (username.value)
 
-    adminUser ! Connect(adminUsername, adminPassword)
-    adminUser ! RegisterUser(username, password = username)
+    val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+    adminUser ! RegisterUser(username, userPass)
 
-    val connected1 = user1 ? Connect(username, password = username)
+    val connected1 = user1 ? Connect(username, userPass)
     connected1.value.get shouldBe Success(Connected)
 
     user1 ! DeleteUser
-    val connected2 = user1 ? Connect(username, password = username)
+    val connected2 = user1 ? Connect(username, userPass)
     connected2.value.get.get match {
       case ConnectError(t) ⇒ //that's all we want to check
     }
   }
 
   "enables users to chat to each other" in new Fixture {
-    withTwoUsers { (username1, username2) ⇒
-      user1 ! Connect(username1, password = username1)
-      user2 ! Connect(username2, password = username2)
+    withTwoUsers { case ((username1, user1Pass), (username2, user2Pass)) ⇒
+      user1 ! Connect(username1, user1Pass)
+      user2 ! Connect(username2, user2Pass)
       user2 ! RegisterMessageListener(messageListener.ref)
 
       user1 ! ChatTo(username2)
@@ -61,8 +61,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   "enables async chats (message recipient offline)" in new Fixture {
-    withTwoUsers { (username1, username2) ⇒
-      user1 ! Connect(username1, password = username1)
+    withTwoUsers { case ((username1, user1Pass), (username2, user2Pass)) ⇒
+      user1 ! Connect(username1, user1Pass)
       user2 ! RegisterMessageListener(messageListener.ref)
 
       user1 ! ChatTo(username2)
@@ -71,17 +71,17 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
       Thread.sleep(1000)
-      user2 ! Connect(username2, password = username2)
+      user2 ! Connect(username2, user2Pass)
 
       verifyMessageArrived(username1, username2, testMessage)
     }
   }
 
   "file transmission" when {
-    "both clients are available" taggedAs (org.scalatest.Tag("foo")) in new Fixture {
-      withTwoUsers { (username1, username2) ⇒
-        user1 ! Connect(username1, password = username1)
-        user2 ! Connect(username2, password = username2)
+    "both clients are available" in new Fixture {
+      withTwoUsers { case ((username1, user1Pass), (username2, user2Pass)) ⇒
+        user1 ! Connect(username1, user1Pass)
+        user2 ! Connect(username2, user2Pass)
         user2 ! RegisterMessageListener(messageListener.ref)
 
 
@@ -91,8 +91,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         messageListener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
           case MessageReceived(chat, message) ⇒
-            chat.getParticipant should startWith(username1)
-            message.getTo should startWith(username2)
+            chat.getParticipant should startWith(username1.value)
+            message.getTo should startWith(username2.value)
 
             // pretty shitty of smack to take a type parameter there... they just cast it!
             val extension = message.getExtension[ExtensionElement](OutOfBandData.ElementName, OutOfBandData.XmlNamespace)
@@ -113,16 +113,18 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       case MessageReceived(_, message) ⇒ message.getSubject == "Welcome!"
     }
 
-    def withTwoUsers(block: (User, User) ⇒ Unit): Unit = {
+    def withTwoUsers(block: ((User, Password), (User, Password)) ⇒ Unit): Unit = {
       val username1 = randomUsername
+      val user1Pass = Password(username1.value)
       val username2 = randomUsername
+      val user2Pass = Password(username2.value)
 
-      adminUser ! Connect(adminUsername, adminPassword)
-      adminUser ! RegisterUser(username1, password = username1)
-      adminUser ! RegisterUser(username2, password = username2)
+      adminUser ! Connect(User(adminUsername), Password(adminPassword))
+      adminUser ! RegisterUser(username1, Password(username1.value))
+      adminUser ! RegisterUser(username2, Password(username2.value))
 
       try {
-        block(username1, username2)
+        block((username1, user1Pass), (username2, user2Pass))
       } finally {
         user1 ! DeleteUser
         user2 ! DeleteUser
@@ -132,14 +134,16 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     def verifyMessageArrived(sender: User, recipient: User, messageBody: String): Unit = {
       messageListener.fishForMessage(3 seconds, "expected message to be delivered") {
         case MessageReceived(chat, message) ⇒
-          chat.getParticipant should startWith(sender)
-          message.getTo should startWith(recipient)
+          chat.getParticipant should startWith(sender.value)
+          message.getTo should startWith(recipient.value)
           message.getBody shouldBe messageBody
           true
         case _ ⇒ false
       }
     }
   }
+
+  def randomUsername = User(s"testuser-${UUID.randomUUID.toString.substring(9)}")
 
   override def beforeEach() {
     system = ActorSystem()
