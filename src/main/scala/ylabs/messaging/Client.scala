@@ -18,8 +18,8 @@ object Client {
     val host = "messaging.host"
   }
 
-  type User = String
-  type Password = String
+  case class User(value: String) extends AnyVal
+  case class Password(value: String) extends AnyVal
 
   sealed trait State
   case object Unconnected extends State
@@ -33,11 +33,11 @@ object Client {
   )
 
   object Messages {
-    case class RegisterUser(username: User, password: Password)
+    case class RegisterUser(user: User, password: Password)
     object DeleteUser
     case class RegisterMessageListener(actor: ActorRef)
 
-    case class Connect(username: String, password: String)
+    case class Connect(user: User, password: Password)
     object Connected
     case class ConnectError(t: Throwable)
 
@@ -62,15 +62,15 @@ class Client extends FSM[State, Context] {
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
       Try {
-        val connection = connect(c.username, c.password)
+        val connection = connect(c.user, c.password)
         val chatManager = setupChatManager(connection)
         (connection, chatManager)
       } match {
         case Success((connection, chatManager)) ⇒
-          log.info(s"user ${c.username} successfully connected")
+          log.info(s"${c.user} successfully connected")
           goto(Connected) using ctx.copy(connection = Some(connection), chatManager = Some(chatManager))
         case Failure(t) ⇒
-          log.error(t, s"unable to connect as user ${c.username}")
+          log.error(t, s"unable to connect as ${c.user}")
           sender ! Messages.ConnectError(t)
           stay
       }
@@ -94,10 +94,10 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
       stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
 
-    case Event(Messages.ChatTo(name), ctx) if ctx.chatManager.isDefined ⇒
-      log.info(s"creating chat to $name")
-      val chat = chatTo(ctx.chatManager.get, name)
-      stay using ctx.copy(chats = ctx.chats + (name → chat))
+    case Event(Messages.ChatTo(user), ctx) if ctx.chatManager.isDefined ⇒
+      log.info(s"creating chat to $user")
+      val chat = chatTo(ctx.chatManager.get, user)
+      stay using ctx.copy(chats = ctx.chats + (user → chat))
 
     case Event(Messages.LeaveChat(recipient), ctx) ⇒
       ctx.chats.get(recipient) match {
@@ -129,7 +129,7 @@ class Client extends FSM[State, Context] {
           val fileInformation = OutOfBandData(fileUrl, description)
           val infoText = "This message contains a link to a file, your client needs to " +
             "implement XEP-0066. If you don't see the file, kindly ask the client developer."
-          val message = new Message(recipient, infoText)
+          val message = new Message(recipient.value, infoText)
           message.addExtension(fileInformation)
           chat.sendMessage(message)
           log.info(s"file message sent to $recipient")
@@ -138,13 +138,13 @@ class Client extends FSM[State, Context] {
       stay
 
     case Event(register: Messages.RegisterUser, ctx) if ctx.connection.isDefined ⇒
-      log.info(s"trying to register user ${register.username}")
+      log.info(s"trying to register ${register.user}")
       val accountManager = AccountManager.getInstance(ctx.connection.get)
       Try {
-        accountManager.createAccount(register.username, register.password)
+        accountManager.createAccount(register.user.value, register.password.value)
       } match {
-        case Success(s) ⇒ log.info(s"user ${register.username} successfully created")
-        case Failure(t) ⇒ log.error(t, s"could not register user ${register.username}!")
+        case Success(s) ⇒ log.info(s"${register.user} successfully created")
+        case Failure(t) ⇒ log.error(t, s"could not register ${register.user}!")
       }
       stay
 
@@ -162,10 +162,10 @@ class Client extends FSM[State, Context] {
 
   }
 
-  def connect(username: String, password: String): XMPPTCPConnection = {
+  def connect(user: User, password: Password): XMPPTCPConnection = {
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
-      .setUsernameAndPassword(username, password)
+      .setUsernameAndPassword(user.value, password.value)
       .setServiceName(domain)
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
@@ -192,8 +192,8 @@ class Client extends FSM[State, Context] {
     log.info("disconnected")
   }
 
-  def chatTo(chatManager: ChatManager, recipient: User): Chat = {
-    val chat = chatManager.createChat(s"$recipient@$domain")
+  def chatTo(chatManager: ChatManager, user: User): Chat = {
+    val chat = chatManager.createChat(s"${user.value}@$domain")
     chat.addMessageListener(chatMessageListener)
     chat
   }

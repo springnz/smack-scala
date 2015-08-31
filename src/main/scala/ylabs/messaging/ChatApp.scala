@@ -2,6 +2,7 @@ package ylabs.messaging
 
 import akka.actor.{ ActorSystem, Props }
 import scala.collection.JavaConversions._
+import Client.{ User, Password }
 
 object ChatApp extends App {
   import Client.Messages._
@@ -19,23 +20,23 @@ object ChatApp extends App {
         // println("password: "); val password = io.StdIn.readLine
         // val username = "admin5"
         // val password = "admin5"
-        chattie ! Connect(username, password)
+        chattie ! Connect(User(username), Password(password))
 
       case "openchat" ⇒
         computerSays("who may i connect you with, sir?")
-        val user = io.StdIn.readLine
+        val user = User(io.StdIn.readLine)
         chattie ! ChatTo(user)
 
       case "message" ⇒
         computerSays("who do you want to send a message to, sir?")
-        val user = io.StdIn.readLine
+        val user = User(io.StdIn.readLine)
         computerSays("what's your message, sir?")
         val message = io.StdIn.readLine
         chattie ! SendMessage(user, message)
 
       case "leavechat" ⇒
         computerSays("who may i disconnect you from, sir?")
-        val user = io.StdIn.readLine
+        val user = User(io.StdIn.readLine)
         chattie ! LeaveChat(user)
 
       case "disconnect" ⇒
