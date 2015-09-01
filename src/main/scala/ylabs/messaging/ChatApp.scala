@@ -3,51 +3,55 @@ package ylabs.messaging
 import akka.actor.{ ActorSystem, Props }
 import scala.collection.JavaConversions._
 import Client.{ User, Password }
+import akka.util.Timeout
+import concurrent.duration._
+import concurrent.Await
+import akka.pattern.ask
 
 object ChatApp extends App {
   import Client.Messages._
 
   val system = ActorSystem()
   val chattie = system.actorOf(Props[Client], "chatClient")
+  implicit val timeout = Timeout(3 seconds)
+
+  computerSays("Welcome, sir! Please help me with the following:")
+  computerSays("username: "); val username = io.StdIn.readLine
+  computerSays("password: "); val password = io.StdIn.readLine
+  val connectPromise = chattie ? Connect(User(username), Password(password))
+  Await.ready(connectPromise, timeout.duration)
+  computerSays("You are connected, sir! Say `help` for usage.")
 
   var on = true
-  computerSays("What now?")
   while (on) {
     io.StdIn.readLine match {
-      case "connect" ⇒
-        println("username: "); val username = io.StdIn.readLine
-        val password = username
-        // println("password: "); val password = io.StdIn.readLine
-        // val username = "admin5"
-        // val password = "admin5"
-        chattie ! Connect(User(username), Password(password))
-
-      case "openchat" ⇒
-        computerSays("who may i connect you with, sir?")
-        val user = User(io.StdIn.readLine)
-        chattie ! ChatTo(user)
+      case "help" ⇒
+        computerSays("Here's what I can do for you, sir.")
+        computerSays("`message`  #send a message to some user")
+        computerSays("`file`     #send a file to another user (XEP-0066 out of band transfer)")
+        computerSays("`exit`     #get me out of here")
 
       case "message" ⇒
-        computerSays("who do you want to send a message to, sir?")
+        computerSays("Who do you want to send a message to, sir?")
         val user = User(io.StdIn.readLine)
-        computerSays("what's your message, sir?")
+        computerSays(s"What do you want to say to ${user.value}, sir?")
         val message = io.StdIn.readLine
         chattie ! SendMessage(user, message)
 
-      case "leavechat" ⇒
-        computerSays("who may i disconnect you from, sir?")
+      case "file" =>
+        computerSays("Who do you want to send a file to, sir?")
         val user = User(io.StdIn.readLine)
-        chattie ! LeaveChat(user)
-
-      case "disconnect" ⇒
-        chattie ! Disconnect
+        computerSays(s"What is the file url, sir?")
+        val fileUrl = io.StdIn.readLine
+        chattie ! SendFileMessage(user, fileUrl, description = None)
 
       case "exit" ⇒
-        computerSays("shutting down")
+        chattie ! Disconnect
+        computerSays("Shutting down")
         system.shutdown()
         on = false
 
-      case _ ⇒ computerSays("Que? No comprendo. Try again, sir!")
+      case _ ⇒ computerSays("¿Qué? No entiendo. Try again, sir! Say `help` for usage.")
     }
   }
 
