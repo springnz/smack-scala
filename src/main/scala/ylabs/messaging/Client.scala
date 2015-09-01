@@ -6,7 +6,7 @@ import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.chat._
-import org.jivesoftware.smack.packet.Message
+import org.jivesoftware.smack.packet.{ ExtensionElement, Message }
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
 import scala.collection.JavaConversions._
@@ -48,7 +48,9 @@ object Client {
     case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
     case class LeaveChat(recipient: User)
 
-    case class MessageReceived(chat: Chat, message: Message)
+    sealed trait AnyMessageReceived
+    case class MessageReceived(chat: Chat, message: Message) extends AnyMessageReceived
+    case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends AnyMessageReceived
   }
 }
 
@@ -110,7 +112,7 @@ class Client extends FSM[State, Context] {
           stay
       }
 
-    case Event(msg: Messages.MessageReceived, ctx) ⇒
+    case Event(msg: Messages.AnyMessageReceived, ctx) ⇒
       ctx.messageListeners foreach { _ ! msg }
       stay
 
@@ -200,8 +202,21 @@ class Client extends FSM[State, Context] {
 
   val chatMessageListener = new ChatMessageListener {
     override def processMessage(chat: Chat, message: Message): Unit = {
-      log.debug(s"ChatMessageListener: received message for $chat : $message")
-      self ! Messages.MessageReceived(chat, message)
+      // pretty shitty of smack to take a type parameter there... all they do is cast it!
+      val fileExtension = message.getExtension[ExtensionElement](OutOfBandData.ElementName, OutOfBandData.XmlNamespace)
+      if (fileExtension == null) {
+        log.debug(s"ChatMessageListener: received message for $chat : $message")
+        self ! Messages.MessageReceived(chat, message)
+      } else {
+        OutOfBandData.fromXml(fileExtension.toXML) match {
+          case Success(outOfBandData) ⇒
+            log.debug(s"ChatMessageListener: received file message for $chat : $message")
+            self ! Messages.FileMessageReceived(chat, message, outOfBandData)
+          case Failure(t) ⇒
+            log.error(t, "ChatMessageListener: received file message but was unable to parse the extension into a XEP-0066 format")
+            self ! Messages.MessageReceived(chat, message)
+        }
+      }
     }
   }
 
