@@ -1,17 +1,16 @@
 package ylabs.messaging
 
+import Client.{ Password, User }
 import Client.Messages._
 import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
 import akka.testkit.{ TestActorRef, TestProbe }
 import akka.util.Timeout
 import java.util.UUID
-import org.jivesoftware.smack.packet.ExtensionElement
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
 import scala.util.{ Success, Try }
-import Client.{User, Password}
 
 // this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
 // see http://docs.ejabberd.im/admin/guide/configuration/#modregister for more details
@@ -31,7 +30,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   "allows user registration and deletion" in new Fixture {
     val username = randomUsername
-    val userPass = Password (username.value)
+    val userPass = Password(username.value)
 
     val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
     adminUser ! RegisterUser(username, userPass)
@@ -47,60 +46,57 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   "enables users to chat to each other" in new Fixture {
-    withTwoUsers { case ((username1, user1Pass), (username2, user2Pass)) ⇒
-      user1 ! Connect(username1, user1Pass)
-      user2 ! Connect(username2, user2Pass)
-      user2 ! RegisterMessageListener(messageListener.ref)
-
-      user1 ! ChatTo(username2)
-      val testMessage = "unique test message" + UUID.randomUUID
-      user1 ! SendMessage(username2, testMessage)
-
-      verifyMessageArrived(username1, username2, testMessage)
-    }
-  }
-
-  "enables async chats (message recipient offline)" in new Fixture {
-    withTwoUsers { case ((username1, user1Pass), (username2, user2Pass)) ⇒
-      user1 ! Connect(username1, user1Pass)
-      user2 ! RegisterMessageListener(messageListener.ref)
-
-      user1 ! ChatTo(username2)
-      val testMessage = "unique test message" + UUID.randomUUID
-      user1 ! SendMessage(username2, testMessage)
-
-      // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
-      Thread.sleep(1000)
-      user2 ! Connect(username2, user2Pass)
-
-      verifyMessageArrived(username1, username2, testMessage)
-    }
-  }
-
-  "file transmission" when {
-    "both clients are available" in new Fixture {
-      withTwoUsers { case ((username1, user1Pass), (username2, user2Pass)) ⇒
+    withTwoUsers {
+      case ((username1, user1Pass), (username2, user2Pass)) ⇒
         user1 ! Connect(username1, user1Pass)
         user2 ! Connect(username2, user2Pass)
         user2 ! RegisterMessageListener(messageListener.ref)
 
+        user1 ! ChatTo(username2)
+        val testMessage = "unique test message" + UUID.randomUUID
+        user1 ! SendMessage(username2, testMessage)
+
+        verifyMessageArrived(username1, username2, testMessage)
+    }
+  }
+
+  "enables async chats (message recipient offline)" in new Fixture {
+    withTwoUsers {
+      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+        user1 ! Connect(username1, user1Pass)
+        user2 ! RegisterMessageListener(messageListener.ref)
+
+        user1 ! ChatTo(username2)
+        val testMessage = "unique test message" + UUID.randomUUID
+        user1 ! SendMessage(username2, testMessage)
+
+        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
+        Thread.sleep(1000)
+        user2 ! Connect(username2, user2Pass)
+
+        verifyMessageArrived(username1, username2, testMessage)
+    }
+  }
+
+  "enables XEP-0066 file transfers" in new Fixture {
+    withTwoUsers {
+      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+        user1 ! Connect(username1, user1Pass)
+        user2 ! Connect(username2, user2Pass)
+        user2 ! RegisterMessageListener(messageListener.ref)
 
         val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
+        val fileDescription = Some("file description")
         user1 ! ChatTo(username2)
-        user1 ! SendFileMessage(username2, fileUrl, Some("file description"))
+        user1 ! SendFileMessage(username2, fileUrl, fileDescription)
 
         messageListener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
-          case MessageReceived(chat, message) ⇒
+          case FileMessageReceived(chat, message, outOfBandData) ⇒
             chat.getParticipant should startWith(username1.value)
             message.getTo should startWith(username2.value)
-
-            // pretty shitty of smack to take a type parameter there... they just cast it!
-            val extension = message.getExtension[ExtensionElement](OutOfBandData.ElementName, OutOfBandData.XmlNamespace)
-            val xml = extension.toXML.toString
-            xml should include(fileUrl) // TODO: parse message properly, check whole schema etc.
-          // TODO: assert file description aswell
+            outOfBandData.url shouldBe fileUrl
+            outOfBandData.desc shouldBe fileDescription
         }
-      }
     }
   }
 
