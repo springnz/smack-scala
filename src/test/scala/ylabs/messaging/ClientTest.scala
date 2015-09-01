@@ -100,32 +100,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  "supports XEP-0066 IQ stanzas" taggedAs(org.scalatest.Tag("foo")) in new Fixture {
-    // this isn't really needed by our client, but just in case another implementation fully follows the standard, this client will confirm that it supports XEP-0066
-    withTwoUsers {
-      case ((username1, user1Pass), (username2, user2Pass)) ⇒
-        user1 ! Connect(username1, user1Pass)
-        user2 ! Connect(username2, user2Pass)
-        user2 ! RegisterMessageListener(messageListener.ref)
-
-        val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
-        val fileDescription = Some("file description")
-        user1 ! ChatTo(username2)
-        Thread.sleep(2000)
-        user1 ! ("foo", username2)
-        Thread.sleep(2000)
-        // user1 ! SendFileMessage(username2, fileUrl, fileDescription)
-
-        // messageListener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
-        //   case FileMessageReceived(chat, message, outOfBandData) ⇒
-        //     chat.getParticipant should startWith(username1.value)
-        //     message.getTo should startWith(username2.value)
-        //     outOfBandData.url shouldBe fileUrl
-        //     outOfBandData.desc shouldBe fileDescription
-        // }
-    }
-  }
-
   trait Fixture {
     val adminUser = TestActorRef(Props[Client])
     val user1 = TestActorRef(Props[Client])
