@@ -43,10 +43,8 @@ object Client {
 
     object Disconnect
 
-    case class ChatTo(recipient: User)
     case class SendMessage(recipient: User, message: String)
     case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
-    case class LeaveChat(recipient: User)
 
     sealed trait AnyMessageReceived
     case class MessageReceived(chat: Chat, message: Message) extends AnyMessageReceived
@@ -96,48 +94,28 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
       stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
 
-    case Event(Messages.ChatTo(user), ctx) if ctx.chatManager.isDefined ⇒
-      log.info(s"creating chat to $user")
-      val chat = chatTo(ctx.chatManager.get, user)
-      stay using ctx.copy(chats = ctx.chats + (user → chat))
-
-    case Event(Messages.LeaveChat(recipient), ctx) ⇒
-      ctx.chats.get(recipient) match {
-        case Some(chat) ⇒
-          chat.close()
-          log.info(s"left chat with $recipient")
-          stay using ctx.copy(chats = ctx.chats - recipient)
-        case _ ⇒
-          log.warning(s"no chat open with user $recipient")
-          stay
-      }
-
     case Event(msg: Messages.AnyMessageReceived, ctx) ⇒
       ctx.messageListeners foreach { _ ! msg }
       stay
 
-    case Event(Messages.SendMessage(recipient, message), ctx) ⇒
-      ctx.chats.get(recipient) match {
-        case Some(chat) ⇒
-          chat.sendMessage(message)
-          log.info(s"message sent to $recipient")
-        case None ⇒ log.error(s"no chat with user $recipient found!")
-      }
-      stay
+    case Event(Messages.SendMessage(recipient, message), ctx) if ctx.chatManager.isDefined ⇒
+      val chat = ctx.chats.get(recipient)
+        .getOrElse(createChat(ctx.chatManager.get, recipient))
+      chat.sendMessage(message)
+      log.info(s"message sent to $recipient")
+      stay using ctx.copy(chats = ctx.chats + (recipient → chat))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
-      ctx.chats.get(recipient) match {
-        case Some(chat) ⇒
-          val fileInformation = OutOfBandData(fileUrl, description)
-          val infoText = "This message contains a link to a file, your client needs to " +
-            "implement XEP-0066. If you don't see the file, kindly ask the client developer."
-          val message = new Message(recipient.value, infoText)
-          message.addExtension(fileInformation)
-          chat.sendMessage(message)
-          log.info(s"file message sent to $recipient")
-        case None ⇒ log.error(s"no chat with user $recipient found!")
-      }
-      stay
+      val chat = ctx.chats.get(recipient)
+        .getOrElse(createChat(ctx.chatManager.get, recipient))
+      val fileInformation = OutOfBandData(fileUrl, description)
+      val infoText = "This message contains a link to a file, your client needs to " +
+        "implement XEP-0066. If you don't see the file, kindly ask the client developer."
+      val message = new Message(recipient.value, infoText)
+      message.addExtension(fileInformation)
+      chat.sendMessage(message)
+      log.info(s"file message sent to $recipient")
+      stay using ctx.copy(chats = ctx.chats + (recipient → chat))
 
     case Event(register: Messages.RegisterUser, ctx) if ctx.connection.isDefined ⇒
       log.info(s"trying to register ${register.user}")
@@ -194,8 +172,8 @@ class Client extends FSM[State, Context] {
     log.info("disconnected")
   }
 
-  def chatTo(chatManager: ChatManager, user: User): Chat = {
-    val chat = chatManager.createChat(s"${user.value}@$domain")
+  def createChat(chatManager: ChatManager, recipient: User): Chat = {
+    val chat = chatManager.createChat(s"${recipient.value}@$domain")
     chat.addMessageListener(chatMessageListener)
     chat
   }

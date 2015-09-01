@@ -52,7 +52,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user2 ! Connect(username2, user2Pass)
         user2 ! RegisterMessageListener(messageListener.ref)
 
-        user1 ! ChatTo(username2)
         val testMessage = "unique test message" + UUID.randomUUID
         user1 ! SendMessage(username2, testMessage)
 
@@ -66,7 +65,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! Connect(username1, user1Pass)
         user2 ! RegisterMessageListener(messageListener.ref)
 
-        user1 ! ChatTo(username2)
         val testMessage = "unique test message" + UUID.randomUUID
         user1 ! SendMessage(username2, testMessage)
 
@@ -87,7 +85,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
         val fileDescription = Some("file description")
-        user1 ! ChatTo(username2)
         user1 ! SendFileMessage(username2, fileUrl, fileDescription)
 
         messageListener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
