@@ -3,6 +3,10 @@ package ylabs.messaging
 import akka.actor.{ ActorSystem, Props }
 import scala.collection.JavaConversions._
 import Client.{ User, Password }
+import akka.util.Timeout
+import concurrent.duration._
+import concurrent.Await
+import akka.pattern.ask
 
 object ChatApp extends App {
   import Client.Messages._
@@ -16,26 +20,25 @@ object ChatApp extends App {
     io.StdIn.readLine match {
       case "connect" ⇒
         println("username: "); val username = io.StdIn.readLine
-        val password = username
-        // println("password: "); val password = io.StdIn.readLine
-        // val username = "admin5"
-        // val password = "admin5"
-        chattie ! Connect(User(username), Password(password))
+        println("password: "); val password = io.StdIn.readLine
+        implicit val timeout = Timeout(3 seconds)
+        val connectPromise = chattie ? Connect(User(username), Password(password))
+        Await.ready(connectPromise, timeout.duration)
 
       case "openchat" ⇒
-        computerSays("who may i connect you with, sir?")
+        computerSays("Who may i connect you with, sir?")
         val user = User(io.StdIn.readLine)
         chattie ! ChatTo(user)
 
       case "message" ⇒
-        computerSays("who do you want to send a message to, sir?")
+        computerSays("Who do you want to send a message to, sir?")
         val user = User(io.StdIn.readLine)
-        computerSays("what's your message, sir?")
+        computerSays("What's your message, sir?")
         val message = io.StdIn.readLine
         chattie ! SendMessage(user, message)
 
       case "leavechat" ⇒
-        computerSays("who may i disconnect you from, sir?")
+        computerSays("Who may i disconnect you from, sir?")
         val user = User(io.StdIn.readLine)
         chattie ! LeaveChat(user)
 
@@ -43,11 +46,12 @@ object ChatApp extends App {
         chattie ! Disconnect
 
       case "exit" ⇒
-        computerSays("shutting down")
+        chattie ! Disconnect
+        computerSays("Shutting down")
         system.shutdown()
         on = false
 
-      case _ ⇒ computerSays("Que? No comprendo. Try again, sir!")
+      case _ ⇒ computerSays("¿Qué? No entiendo. Try again, sir!")
     }
   }
 
