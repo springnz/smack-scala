@@ -20,17 +20,30 @@ object ChatApp extends App {
   computerSays("password: "); val password = io.StdIn.readLine
   val connectPromise = chattie ? Connect(User(username), Password(password))
   Await.ready(connectPromise, timeout.duration)
-  computerSays("You are connected, sir!")
+  computerSays("You are connected, sir! Say `help` for usage.")
 
   var on = true
   while (on) {
     io.StdIn.readLine match {
+      case "help" ⇒
+        computerSays("Here's what I can do for you, sir.")
+        computerSays("`message`  #send a message to some user")
+        computerSays("`file`     #send a file to another user (XEP-0066 out of band transfer)")
+        computerSays("`exit`     #get me out of here")
+
       case "message" ⇒
         computerSays("Who do you want to send a message to, sir?")
         val user = User(io.StdIn.readLine)
-        computerSays("What's your message, sir?")
+        computerSays(s"What do you want to say to ${user.value}, sir?")
         val message = io.StdIn.readLine
         chattie ! SendMessage(user, message)
+
+      case "file" =>
+        computerSays("Who do you want to send a file to, sir?")
+        val user = User(io.StdIn.readLine)
+        computerSays(s"What is the file url, sir?")
+        val fileUrl = io.StdIn.readLine
+        chattie ! SendFileMessage(user, fileUrl, description = None)
 
       case "exit" ⇒
         chattie ! Disconnect
@@ -38,7 +51,7 @@ object ChatApp extends App {
         system.shutdown()
         on = false
 
-      case _ ⇒ computerSays("¿Qué? No entiendo. Try again, sir!")
+      case _ ⇒ computerSays("¿Qué? No entiendo. Try again, sir! Say `help` for usage.")
     }
   }
 
