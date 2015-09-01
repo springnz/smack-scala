@@ -5,7 +5,11 @@ import OutOfBandData._
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
+import org.jivesoftware.smack.StanzaListener
 import org.jivesoftware.smack.chat._
+import org.jivesoftware.smack.packet.IQ
+import org.jivesoftware.smack.packet.IQ.IQChildElementXmlStringBuilder
+import org.jivesoftware.smack.packet.Stanza
 import org.jivesoftware.smack.packet.{ ExtensionElement, Message }
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
@@ -123,6 +127,42 @@ class Client extends FSM[State, Context] {
           log.info(s"message sent to $recipient")
         case None ⇒ log.error(s"no chat with user $recipient found!")
       }
+      stay
+
+    // TODO: remove
+    case Event(("foo", recipient: User), ctx) ⇒
+      case class FileTransferInit(
+          from: String,
+          to: String,
+          fileUrl: String,
+          description: Option[String] = None
+      ) extends IQ("query", XmlNamespace) {
+        setType(IQ.Type.set)
+        setFrom(from)
+        setTo(to)
+
+        override def getIQChildElementBuilder(xml: IQChildElementXmlStringBuilder): IQChildElementXmlStringBuilder = {
+          xml.rightAngleBracket
+          xml.element("url", fileUrl)
+          description map { desc ⇒ xml.element("desc", desc) }
+          xml
+        }
+      }
+
+      val iq: IQ = FileTransferInit(
+        from = ctx.connection.get.getUser,
+        to = recipient.value + "@" + domain + "/Smack",
+        fileUrl = "http://path/to/file",
+        description = Some("description"))
+
+      val stanzaListener = new StanzaListener {
+        override def processPacket(response: Stanza): Unit = {
+          println("XXXXXXXXXXXXXXXXXxx")
+          println(s"got stanza response: $response")
+        }
+      }
+      ctx.connection.get.sendIqWithResponseCallback(iq, stanzaListener)
+      log.info(s"message sent to $recipient")
       stay
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
