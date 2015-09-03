@@ -4,9 +4,12 @@ import Client._
 import OutOfBandData._
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
+import java.util.Collection
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.chat._
-import org.jivesoftware.smack.packet.{ ExtensionElement, Message }
+import org.jivesoftware.smack.packet.{ ExtensionElement, Message, Presence }
+import org.jivesoftware.smack.roster.Roster
+import org.jivesoftware.smack.roster.RosterListener
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
 import scala.collection.JavaConversions._
@@ -40,9 +43,8 @@ object Client {
     case class Connect(user: User, password: Password)
     object Connected
     case class ConnectError(t: Throwable)
-
     object Disconnect
-
+    object GetRoster
     case class SendMessage(recipient: User, message: String)
     case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
 
@@ -140,6 +142,11 @@ class Client extends FSM[State, Context] {
       self ! Messages.Disconnect
       stay
 
+    case Event(Messages.GetRoster, ctx) if ctx.connection.isDefined ⇒
+      val roster = Roster.getInstanceFor(ctx.connection.get)
+      sender ! roster
+      stay
+
   }
 
   def connect(user: User, password: Password): XMPPTCPConnection = {
@@ -149,6 +156,7 @@ class Client extends FSM[State, Context] {
       .setServiceName(domain)
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
+      .setSendPresence(true)
       .build
     )
     connection.connect().login()
@@ -195,6 +203,21 @@ class Client extends FSM[State, Context] {
             self ! Messages.MessageReceived(chat, message)
         }
       }
+    }
+  }
+
+  val rosterListener = new RosterListener {
+    def entriesAdded(entries: Collection[String]): Unit = {
+      log.debug("roster entries added: " + entries.toList)
+    }
+    def entriesDeleted(entries: Collection[String]): Unit = {
+      log.debug("roster entries deleted: " + entries.toList)
+    }
+    def entriesUpdated(entries: Collection[String]): Unit = {
+      log.debug("roster entries updated: " + entries.toList)
+    }
+    def presenceChanged(presence: Presence): Unit = {
+      log.debug(s"presence changed: $presence")
     }
   }
 

@@ -7,8 +7,10 @@ import akka.pattern.ask
 import akka.testkit.{ TestActorRef, TestProbe }
 import akka.util.Timeout
 import java.util.UUID
+import org.jivesoftware.smack.roster.Roster
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.util.{ Success, Try }
 
@@ -94,6 +96,47 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             outOfBandData.url shouldBe fileUrl
             outOfBandData.desc shouldBe fileDescription
         }
+    }
+  }
+
+  "automatically subscribes to presence of chat partners" taggedAs(org.scalatest.Tag("foo")) in new Fixture {
+    withTwoUsers {
+      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+        user1 ! Connect(username1, user1Pass)
+        user2 ! Connect(username2, user2Pass)
+
+        val rosterFuture = (user1 ? GetRoster).mapTo[Roster]
+        val roster = Await.result(rosterFuture, 3 seconds)
+        roster
+
+        // val testMessage = "unique test message" + UUID.randomUUID
+        // user1 ! SendMessage(username2, testMessage)
+
+        // Thread.sleep(1000)
+        // user1 ! Disconnect
+        // user2 ! Disconnect
+        // user1 ! Connect(username1, user1Pass)
+        // user2 ! Connect(username2, user2Pass)
+        // Thread.sleep(1000)
+
+        // user1 ! GetRoster
+        // Thread.sleep(1000)
+        // user2 ! GetRoster
+        // Thread.sleep(1000)
+
+        // user2 ! RegisterMessageListener(messageListener.ref)
+
+        // val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
+        // val fileDescription = Some("file description")
+        // user1 ! SendFileMessage(username2, fileUrl, fileDescription)
+
+        // messageListener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
+        //   case FileMessageReceived(chat, message, outOfBandData) ⇒
+        //     chat.getParticipant should startWith(username1.value)
+        //     message.getTo should startWith(username2.value)
+        //     outOfBandData.url shouldBe fileUrl
+        //     outOfBandData.desc shouldBe fileDescription
+        // }
     }
   }
 
