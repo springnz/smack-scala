@@ -30,7 +30,6 @@ object Client {
 
   case class Context(
     connection: Option[XMPPTCPConnection],
-    chatManager: Option[ChatManager],
     chats: Map[User, Chat],
     messageListeners: Set[ActorRef]
   )
@@ -55,7 +54,7 @@ object Client {
 }
 
 class Client extends FSM[State, Context] {
-  startWith(Unconnected, Context(None, None, Map.empty, Set.empty))
+  startWith(Unconnected, Context(connection = None, chats = Map.empty, messageListeners = Set.empty))
 
   lazy val config = ConfigFactory.load()
   lazy val domain = config.getString(ConfigKeys.domain)
@@ -63,14 +62,10 @@ class Client extends FSM[State, Context] {
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
-      Try {
-        val connection = connect(c.user, c.password)
-        val chatManager = setupChatManager(connection)
-        (connection, chatManager)
-      } match {
-        case Success((connection, chatManager)) ⇒
+      Try { connect(c.user, c.password) } match {
+        case Success(connection) ⇒
           log.info(s"${c.user} successfully connected")
-          goto(Connected) using ctx.copy(connection = Some(connection), chatManager = Some(chatManager))
+          goto(Connected) using ctx.copy(connection = Some(connection))
         case Failure(t) ⇒
           log.error(t, s"unable to connect as ${c.user}")
           sender ! Messages.ConnectError(t)
@@ -91,7 +86,7 @@ class Client extends FSM[State, Context] {
   when(Connected) {
     case Event(Messages.Disconnect, ctx) ⇒
       disconnect(ctx)
-      goto(Unconnected) using ctx.copy(connection = None, chatManager = None, chats = Map.empty)
+      goto(Unconnected) using ctx.copy(connection = None, chats = Map.empty)
 
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
       stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
@@ -100,16 +95,16 @@ class Client extends FSM[State, Context] {
       ctx.messageListeners foreach { _ ! msg }
       stay
 
-    case Event(Messages.SendMessage(recipient, message), ctx) if ctx.chatManager.isDefined ⇒
-      val chat = ctx.chats.get(recipient)
-        .getOrElse(createChat(ctx.chatManager.get, recipient))
+    case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
+      val chat = chats.get(recipient)
+        .getOrElse(createChat(connection, recipient))
       chat.sendMessage(message)
       log.info(s"message sent to $recipient")
-      stay using ctx.copy(chats = ctx.chats + (recipient → chat))
+      stay using ctx.copy(chats = chats + (recipient → chat))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
       val chat = ctx.chats.get(recipient)
-        .getOrElse(createChat(ctx.chatManager.get, recipient))
+        .getOrElse(createChat(ctx.connection.get, recipient))
       val fileInformation = OutOfBandData(fileUrl, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
@@ -119,9 +114,9 @@ class Client extends FSM[State, Context] {
       log.info(s"file message sent to $recipient")
       stay using ctx.copy(chats = ctx.chats + (recipient → chat))
 
-    case Event(register: Messages.RegisterUser, ctx) if ctx.connection.isDefined ⇒
+    case Event(register: Messages.RegisterUser, Context(Some(connection), chats, _)) ⇒
       log.info(s"trying to register ${register.user}")
-      val accountManager = AccountManager.getInstance(ctx.connection.get)
+      val accountManager = AccountManager.getInstance(connection)
       Try {
         accountManager.createAccount(register.user.value, register.password.value)
       } match {
@@ -130,9 +125,9 @@ class Client extends FSM[State, Context] {
       }
       stay
 
-    case Event(Messages.DeleteUser, ctx) if ctx.connection.isDefined ⇒
+    case Event(Messages.DeleteUser, Context(Some(connection), chats, _)) ⇒
       log.info(s"trying to delete user")
-      val accountManager = AccountManager.getInstance(ctx.connection.get)
+      val accountManager = AccountManager.getInstance(connection)
       Try {
         accountManager.deleteAccount()
       } match {
@@ -142,11 +137,10 @@ class Client extends FSM[State, Context] {
       self ! Messages.Disconnect
       stay
 
-    case Event(Messages.GetRoster, ctx) if ctx.connection.isDefined ⇒
-      val roster = Roster.getInstanceFor(ctx.connection.get)
+    case Event(Messages.GetRoster, Context(Some(connection), chats, _)) ⇒
+      val roster = Roster.getInstanceFor(connection)
       sender ! roster
       stay
-
   }
 
   def connect(user: User, password: Password): XMPPTCPConnection = {
@@ -160,6 +154,7 @@ class Client extends FSM[State, Context] {
       .build
     )
     connection.connect().login()
+    setupChatManager(connection)
     setupRosterManager(connection)
     connection
   }
@@ -199,7 +194,8 @@ class Client extends FSM[State, Context] {
     log.info("disconnected")
   }
 
-  def createChat(chatManager: ChatManager, recipient: User): Chat = {
+  def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
+    val chatManager = ChatManager.getInstanceFor(connection)
     val chat = chatManager.createChat(s"${recipient.value}@$domain")
     chat.addMessageListener(chatMessageListener)
     chat
