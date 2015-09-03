@@ -160,6 +160,7 @@ class Client extends FSM[State, Context] {
       .build
     )
     connection.connect().login()
+    setupRosterManager(connection)
     connection
   }
 
@@ -173,6 +174,24 @@ class Client extends FSM[State, Context] {
     })
     chatManager
   }
+
+  def setupRosterManager(connection: XMPPTCPConnection): Unit =
+    Roster.getInstanceFor(connection).addRosterListener(
+      new RosterListener {
+        def entriesAdded(entries: Collection[String]): Unit = {
+          log.debug("roster entries added: " + entries.toList)
+        }
+        def entriesDeleted(entries: Collection[String]): Unit = {
+          log.debug("roster entries deleted: " + entries.toList)
+        }
+        def entriesUpdated(entries: Collection[String]): Unit = {
+          log.debug("roster entries updated: " + entries.toList)
+        }
+        def presenceChanged(presence: Presence): Unit = {
+          log.debug(s"presence changed: $presence")
+        }
+      }
+    )
 
   def disconnect(ctx: Context): Unit = {
     ctx.chats.values.foreach(_.close())
@@ -203,21 +222,6 @@ class Client extends FSM[State, Context] {
             self ! Messages.MessageReceived(chat, message)
         }
       }
-    }
-  }
-
-  val rosterListener = new RosterListener {
-    def entriesAdded(entries: Collection[String]): Unit = {
-      log.debug("roster entries added: " + entries.toList)
-    }
-    def entriesDeleted(entries: Collection[String]): Unit = {
-      log.debug("roster entries deleted: " + entries.toList)
-    }
-    def entriesUpdated(entries: Collection[String]): Unit = {
-      log.debug("roster entries updated: " + entries.toList)
-    }
-    def presenceChanged(presence: Presence): Unit = {
-      log.debug(s"presence changed: $presence")
     }
   }
 
