@@ -44,12 +44,15 @@ object Client {
     case class ConnectError(t: Throwable)
     object Disconnect
     object GetRoster
+    case class GetRosterResponse(roster: Roster)
     case class SendMessage(recipient: User, message: String)
     case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
 
-    sealed trait AnyMessageReceived
-    case class MessageReceived(chat: Chat, message: Message) extends AnyMessageReceived
-    case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends AnyMessageReceived
+    sealed trait ListenerEvent
+    case class MessageReceived(chat: Chat, message: Message) extends ListenerEvent
+    case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
+    case class UserBecameAvailable(user: User) extends ListenerEvent
+    case class UserBecameUnavailable(user: User) extends ListenerEvent
   }
 }
 
@@ -91,7 +94,7 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
       stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
 
-    case Event(msg: Messages.AnyMessageReceived, ctx) ⇒
+    case Event(msg: Messages.ListenerEvent, ctx) ⇒
       ctx.messageListeners foreach { _ ! msg }
       stay
 
@@ -139,7 +142,7 @@ class Client extends FSM[State, Context] {
 
     case Event(Messages.GetRoster, Context(Some(connection), chats, _)) ⇒
       val roster = Roster.getInstanceFor(connection)
-      sender ! roster
+      sender ! Messages.GetRosterResponse(roster)
       stay
   }
 
@@ -155,8 +158,14 @@ class Client extends FSM[State, Context] {
     )
     connection.connect().login()
     setupChatManager(connection)
-    setupRosterManager(connection)
+    setupRosterListener(connection)
     connection
+  }
+
+  def disconnect(ctx: Context): Unit = {
+    ctx.chats.values.foreach(_.close())
+    ctx.connection.foreach(_.disconnect())
+    log.info("disconnected")
   }
 
   def setupChatManager(connection: XMPPTCPConnection): ChatManager = {
@@ -170,7 +179,7 @@ class Client extends FSM[State, Context] {
     chatManager
   }
 
-  def setupRosterManager(connection: XMPPTCPConnection): Unit =
+  def setupRosterListener(connection: XMPPTCPConnection): Unit =
     Roster.getInstanceFor(connection).addRosterListener(
       new RosterListener {
         def entriesAdded(entries: Collection[String]): Unit = {
@@ -183,21 +192,33 @@ class Client extends FSM[State, Context] {
           log.debug("roster entries updated: " + entries.toList)
         }
         def presenceChanged(presence: Presence): Unit = {
-          log.debug(s"presence changed: $presence")
+          val user = User(presence.getFrom)
+          presence.getType match {
+            case Presence.Type.available ⇒
+              log.debug(s"$user became available")
+              self ! Messages.UserBecameAvailable(user)
+            case Presence.Type.unavailable ⇒
+              log.debug(s"$user became unavailable")
+              self ! Messages.UserBecameUnavailable(user)
+            case _ ⇒ log.debug(s"presence changed: $presence")
+          }
         }
       }
     )
-
-  def disconnect(ctx: Context): Unit = {
-    ctx.chats.values.foreach(_.close())
-    ctx.connection.foreach(_.disconnect())
-    log.info("disconnected")
-  }
 
   def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
     val chat = chatManager.createChat(s"${recipient.value}@$domain")
     chat.addMessageListener(chatMessageListener)
+    log.debug(s"chat with $recipient created")
+
+    val presence = new Presence(Presence.Type.subscribe)
+    presence.setTo(s"${recipient.value}@$domain")
+    connection.sendStanza(presence)
+    // TODO: extract into separate method?
+    // TODO: optimisation: only send if not yet in roster?
+    log.debug(s"requesting roster presence permissions for $recipient")
+
     chat
   }
 

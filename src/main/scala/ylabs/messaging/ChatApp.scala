@@ -33,13 +33,9 @@ object ChatApp extends App {
         computerSays("`roster`   #get information about who is online at the moment")
         computerSays("`exit`     #get me out of here")
 
-      // TODO: remove
-      case "foo" =>
-        chattie ! "foo"
-
       case "roster" =>
-        val rosterFuture = (chattie ? GetRoster).mapTo[Roster]
-        val roster = Await.result(rosterFuture, 3 seconds)
+        val rosterFuture = (chattie ? GetRoster).mapTo[GetRosterResponse]
+        val roster = Await.result(rosterFuture, 3 seconds).roster
         roster.getEntries foreach { entry =>
           computerSays(s"presence: ${roster.getPresence(entry.getUser)}")
           computerSays(s"user: ${entry.getUser}")
