@@ -76,6 +76,10 @@ class Client extends FSM[State, Context] {
 
     case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
       stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
+
+    case Event(msg: Messages.ListenerEvent, ctx) ⇒
+      ctx.messageListeners foreach { _ ! msg }
+      stay
   }
 
   onTransition {
