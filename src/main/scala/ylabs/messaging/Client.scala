@@ -8,8 +8,7 @@ import java.util.Collection
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet.{ ExtensionElement, Message, Presence }
-import org.jivesoftware.smack.roster.Roster
-import org.jivesoftware.smack.roster.RosterListener
+import org.jivesoftware.smack.roster.{ Roster, RosterListener }
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
 import scala.collection.JavaConversions._
@@ -128,7 +127,7 @@ class Client extends FSM[State, Context] {
       }
       stay
 
-    case Event(Messages.DeleteUser, Context(Some(connection), chats, _)) ⇒
+    case Event(Messages.DeleteUser, ctx @ Context(Some(connection), _, _)) ⇒
       log.info(s"trying to delete user")
       val accountManager = AccountManager.getInstance(connection)
       Try {
@@ -137,8 +136,7 @@ class Client extends FSM[State, Context] {
         case Success(s) ⇒ log.info(s"user successfully deleted")
         case Failure(t) ⇒ log.error(t, s"could not delete user!")
       }
-      self ! Messages.Disconnect
-      stay
+      goto(Unconnected) using ctx.copy(connection = None, chats = Map.empty)
 
     case Event(Messages.GetRoster, Context(Some(connection), chats, _)) ⇒
       val roster = Roster.getInstanceFor(connection)
@@ -180,31 +178,7 @@ class Client extends FSM[State, Context] {
   }
 
   def setupRosterListener(connection: XMPPTCPConnection): Unit =
-    Roster.getInstanceFor(connection).addRosterListener(
-      new RosterListener {
-        def entriesAdded(entries: Collection[String]): Unit = {
-          log.debug("roster entries added: " + entries.toList)
-        }
-        def entriesDeleted(entries: Collection[String]): Unit = {
-          log.debug("roster entries deleted: " + entries.toList)
-        }
-        def entriesUpdated(entries: Collection[String]): Unit = {
-          log.debug("roster entries updated: " + entries.toList)
-        }
-        def presenceChanged(presence: Presence): Unit = {
-          val user = User(presence.getFrom)
-          presence.getType match {
-            case Presence.Type.available ⇒
-              log.debug(s"$user became available")
-              self ! Messages.UserBecameAvailable(user)
-            case Presence.Type.unavailable ⇒
-              log.debug(s"$user became unavailable")
-              self ! Messages.UserBecameUnavailable(user)
-            case _ ⇒ log.debug(s"presence changed: $presence")
-          }
-        }
-      }
-    )
+    Roster.getInstanceFor(connection).addRosterListener(rosterListener)
 
   def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
@@ -238,6 +212,30 @@ class Client extends FSM[State, Context] {
             log.error(t, "ChatMessageListener: received file message but was unable to parse the extension into a XEP-0066 format")
             self ! Messages.MessageReceived(chat, message)
         }
+      }
+    }
+  }
+
+  val rosterListener = new RosterListener {
+    def entriesAdded(entries: Collection[String]): Unit = {
+      log.debug("roster entries added: " + entries.toList)
+    }
+    def entriesDeleted(entries: Collection[String]): Unit = {
+      log.debug("roster entries deleted: " + entries.toList)
+    }
+    def entriesUpdated(entries: Collection[String]): Unit = {
+      log.debug("roster entries updated: " + entries.toList)
+    }
+    def presenceChanged(presence: Presence): Unit = {
+      val user = User(presence.getFrom)
+      presence.getType match {
+        case Presence.Type.available ⇒
+          log.debug(s"$user became available")
+          self ! Messages.UserBecameAvailable(user)
+        case Presence.Type.unavailable ⇒
+          log.debug(s"$user became unavailable")
+          self ! Messages.UserBecameUnavailable(user)
+        case _ ⇒ log.debug(s"presence changed: $presence")
       }
     }
   }

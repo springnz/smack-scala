@@ -80,7 +80,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  "enables XEP-0066 file transfers" in new Fixture {
+  "enables XEP-0066 file transfers" taggedAs (org.scalatest.Tag("foo")) in new Fixture {
     withTwoUsers {
       case ((username1, user1Pass), (username2, user2Pass)) ⇒
         user1 ! Connect(username1, user1Pass)
@@ -109,7 +109,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val user1Listener = newEventListener
         user1 ! RegisterMessageListener(user1Listener.ref)
         user1Listener.ignoreMsg {
-          case _: MessageReceived ⇒ true
+          case _: MessageReceived     ⇒ true
           case _: UserBecameAvailable ⇒ true
         }
 
