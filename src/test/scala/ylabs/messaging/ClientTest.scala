@@ -53,7 +53,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! Connect(username1, user1Pass)
         user2 ! Connect(username2, user2Pass)
         val user2Listener = newEventListener
-        user2 ! RegisterMessageListener(user2Listener.ref)
+        user2 ! RegisterEventListener(user2Listener.ref)
 
         val testMessage = "unique test message" + UUID.randomUUID
         user1 ! SendMessage(username2, testMessage)
@@ -67,7 +67,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       case ((username1, user1Pass), (username2, user2Pass)) ⇒
         user1 ! Connect(username1, user1Pass)
         val user2Listener = newEventListener
-        user2 ! RegisterMessageListener(user2Listener.ref)
+        user2 ! RegisterEventListener(user2Listener.ref)
 
         val testMessage = "unique test message" + UUID.randomUUID
         user1 ! SendMessage(username2, testMessage)
@@ -86,7 +86,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! Connect(username1, user1Pass)
         user2 ! Connect(username2, user2Pass)
         val user2Listener = newEventListener
-        user2 ! RegisterMessageListener(user2Listener.ref)
+        user2 ! RegisterEventListener(user2Listener.ref)
 
         val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
         val fileDescription = Some("file description")
@@ -107,14 +107,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       case ((username1, user1Pass), (username2, user2Pass)) ⇒
         user1 ! Connect(username1, user1Pass)
         val user1Listener = newEventListener
-        user1 ! RegisterMessageListener(user1Listener.ref)
+        user1 ! RegisterEventListener(user1Listener.ref)
         user1Listener.ignoreMsg {
           case _: MessageReceived     ⇒ true
           case _: UserBecameAvailable ⇒ true
         }
 
         val user2Listener = newEventListener
-        user2 ! RegisterMessageListener(user2Listener.ref)
+        user2 ! RegisterEventListener(user2Listener.ref)
         user2 ! Connect(username2, user2Pass)
 
         val testMessage = "unique test message" + UUID.randomUUID
@@ -147,11 +147,11 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     val user2 = TestActorRef(Props[Client])
 
     def newEventListener: TestProbe = {
-      val messageListener = TestProbe()
-      messageListener.ignoreMsg {
+      val eventListener = TestProbe()
+      eventListener.ignoreMsg {
         case MessageReceived(_, message) ⇒ message.getSubject == "Welcome!"
       }
-      messageListener
+      eventListener
     }
 
     def withTwoUsers(block: ((User, Password), (User, Password)) ⇒ Unit): Unit = {

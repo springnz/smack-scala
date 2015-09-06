@@ -30,13 +30,13 @@ object Client {
   case class Context(
     connection: Option[XMPPTCPConnection],
     chats: Map[User, Chat],
-    messageListeners: Set[ActorRef]
+    eventListeners: Set[ActorRef]
   )
 
   object Messages {
     case class RegisterUser(user: User, password: Password)
     object DeleteUser
-    case class RegisterMessageListener(actor: ActorRef)
+    case class RegisterEventListener(actor: ActorRef)
 
     case class Connect(user: User, password: Password)
     object Connected
@@ -56,7 +56,7 @@ object Client {
 }
 
 class Client extends FSM[State, Context] {
-  startWith(Unconnected, Context(connection = None, chats = Map.empty, messageListeners = Set.empty))
+  startWith(Unconnected, Context(connection = None, chats = Map.empty, eventListeners = Set.empty))
 
   lazy val config = ConfigFactory.load()
   lazy val domain = config.getString(ConfigKeys.domain)
@@ -74,11 +74,11 @@ class Client extends FSM[State, Context] {
           stay
       }
 
-    case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
-      stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
+    case Event(Messages.RegisterEventListener(actor), ctx) ⇒
+      stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
     case Event(msg: Messages.ListenerEvent, ctx) ⇒
-      ctx.messageListeners foreach { _ ! msg }
+      ctx.eventListeners foreach { _ ! msg }
       stay
   }
 
@@ -94,11 +94,11 @@ class Client extends FSM[State, Context] {
       disconnect(ctx)
       goto(Unconnected) using ctx.copy(connection = None, chats = Map.empty)
 
-    case Event(Messages.RegisterMessageListener(actor), ctx) ⇒
-      stay using ctx.copy(messageListeners = ctx.messageListeners + actor)
+    case Event(Messages.RegisterEventListener(actor), ctx) ⇒
+      stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
     case Event(msg: Messages.ListenerEvent, ctx) ⇒
-      ctx.messageListeners foreach { _ ! msg }
+      ctx.eventListeners foreach { _ ! msg }
       stay
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
