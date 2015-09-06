@@ -55,7 +55,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val user2Listener = newEventListener
         user2 ! RegisterEventListener(user2Listener.ref)
 
-        val testMessage = "unique test message" + UUID.randomUUID
         user1 ! SendMessage(username2, testMessage)
 
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
@@ -69,7 +68,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val user2Listener = newEventListener
         user2 ! RegisterEventListener(user2Listener.ref)
 
-        val testMessage = "unique test message" + UUID.randomUUID
         user1 ! SendMessage(username2, testMessage)
 
         // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
@@ -117,7 +115,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user2 ! RegisterEventListener(user2Listener.ref)
         user2 ! Connect(username2, user2Pass)
 
-        val testMessage = "unique test message" + UUID.randomUUID
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
@@ -153,6 +150,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
       eventListener
     }
+
+    val testMessage = "unique test message" + UUID.randomUUID
 
     def withTwoUsers(block: ((User, Password), (User, Password)) ⇒ Unit): Unit = {
       val username1 = randomUsername
