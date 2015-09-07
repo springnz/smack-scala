@@ -92,9 +92,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       user1 ! SendMessage(username2, testMessage)
       verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-      // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
-      Thread.sleep(1000)
-
       {
         val roster = getRoster
         roster.getEntries should have size 1
@@ -104,8 +101,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
 
       user2 ! Disconnect
-      // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
-      Thread.sleep(1000)
 
       {
         val roster = getRoster
@@ -126,9 +121,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     withTwoConnectedUsers {
       user1 ! SendMessage(username2, testMessage)
       verifyMessageArrived(user2Listener, username1, username2, testMessage)
-
-      // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
-      Thread.sleep(1000)
 
       user2 ! Disconnect
       user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
