@@ -189,15 +189,20 @@ class Client extends FSM[State, Context] {
     val chat = chatManager.createChat(s"${recipient.value}@$domain")
     chat.addMessageListener(chatMessageListener)
     log.debug(s"chat with $recipient created")
-
-    val presence = new Presence(Presence.Type.subscribe)
-    presence.setTo(s"${recipient.value}@$domain")
-    connection.sendStanza(presence)
-    // TODO: extract into separate method?
-    // TODO: optimisation: only send if not yet in roster?
-    log.debug(s"requesting roster presence permissions for $recipient")
-
+    subscribeToStatus(connection, recipient)
     chat
+  }
+
+  def subscribeToStatus(connection: XMPPTCPConnection, user: User): Unit = {
+    val username = s"${user.value}@$domain"
+    val roster = Roster.getInstanceFor(connection)
+    if (!roster.getEntries.contains(username)) {
+      val presence = new Presence(Presence.Type.subscribe)
+      presence.setTo(username)
+      log.info(s"requesting roster presence permissions for $user")
+      connection.sendStanza(presence)
+      log.info(s"requested roster presence permissions for $user")
+    }
   }
 
   val chatMessageListener = new ChatMessageListener {
