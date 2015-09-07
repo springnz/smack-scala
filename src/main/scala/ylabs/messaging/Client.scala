@@ -1,4 +1,4 @@
-package ylabs.messaging
+package smack.scala
 
 import Client._
 import OutOfBandData._

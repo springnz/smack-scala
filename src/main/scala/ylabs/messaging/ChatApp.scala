@@ -1,4 +1,4 @@
-package ylabs.messaging
+package smack.scala
 
 import akka.actor.{ ActorSystem, Props }
 import org.jivesoftware.smack.roster.Roster

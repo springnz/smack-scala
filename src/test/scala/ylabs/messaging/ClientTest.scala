@@ -1,4 +1,4 @@
-package ylabs.messaging
+package smack.scala
 
 import Client.{ Password, User }
 import Client.Messages._

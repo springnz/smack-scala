@@ -1,4 +1,4 @@
-package ylabs.messaging
+package smack.scala
 
 import org.scalatest.{ Matchers, WordSpec }
 import scala.util.Success

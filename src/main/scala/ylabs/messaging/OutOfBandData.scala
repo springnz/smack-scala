@@ -1,4 +1,4 @@
-package ylabs.messaging
+package smack.scala
 
 import org.jivesoftware.smack.packet.ExtensionElement
 import org.jivesoftware.smack.packet.IQ
