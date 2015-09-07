@@ -6,6 +6,7 @@ import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
 import akka.testkit.{ TestActorRef, TestProbe }
 import akka.util.Timeout
+import com.typesafe.config.ConfigFactory
 import java.util.UUID
 import org.jivesoftware.smack.packet.Presence
 import org.jivesoftware.smack.roster.Roster
@@ -22,8 +23,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   implicit var system: ActorSystem = _
   implicit val timeout = Timeout(5 seconds)
 
-  val adminUsername = "admin"
-  val adminPassword = "admin"
+  val config = ConfigFactory.load
+  val adminUsername = config.getString("messaging.admin.username")
+  val adminPassword = config.getString("messaging.admin.password")
 
   "connects to the xmpp server" in new Fixture {
     val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
