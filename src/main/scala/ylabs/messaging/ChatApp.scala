@@ -1,6 +1,7 @@
 package ylabs.messaging
 
 import akka.actor.{ ActorSystem, Props }
+import org.jivesoftware.smack.roster.Roster
 import scala.collection.JavaConversions._
 import Client.{ User, Password }
 import akka.util.Timeout
@@ -29,7 +30,16 @@ object ChatApp extends App {
         computerSays("Here's what I can do for you, sir.")
         computerSays("`message`  #send a message to some user")
         computerSays("`file`     #send a file to another user (XEP-0066 out of band transfer)")
+        computerSays("`roster`   #get information about who is online at the moment")
         computerSays("`exit`     #get me out of here")
+
+      case "roster" =>
+        val rosterFuture = (chattie ? GetRoster).mapTo[GetRosterResponse]
+        val roster = Await.result(rosterFuture, 3 seconds).roster
+        roster.getEntries foreach { entry =>
+          computerSays(s"presence: ${roster.getPresence(entry.getUser)}")
+          computerSays(s"user: ${entry.getUser}")
+        }
 
       case "message" ⇒
         computerSays("Who do you want to send a message to, sir?")
