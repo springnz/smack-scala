@@ -50,7 +50,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   "enables users to chat to each other" in new Fixture {
     withTwoUsers {
-      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
         user1 ! Connect(username1, user1Pass)
         user2 ! Connect(username2, user2Pass)
         val user2Listener = newEventListener
@@ -64,7 +64,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   "enables async chats (message recipient offline)" in new Fixture {
     withTwoUsers {
-      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
         user1 ! Connect(username1, user1Pass)
         val user2Listener = newEventListener
         user2 ! RegisterEventListener(user2Listener.ref)
@@ -81,7 +81,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   "enables XEP-0066 file transfers" in new Fixture {
     withTwoUsers {
-      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
         user1 ! Connect(username1, user1Pass)
         user2 ! Connect(username2, user2Pass)
         val user2Listener = newEventListener
@@ -101,9 +101,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  "provides information about who is online and offline (roster)" taggedAs (org.scalatest.Tag("foo")) in new Fixture {
+  "provides information about who is online and offline (roster)" in new Fixture {
     withTwoUsers {
-      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
         def getRoster: Roster = {
           val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
           Await.result(rosterFuture, 3 seconds).roster
@@ -151,7 +151,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   "informs event listeners about chat partners becoming available / unavailable" in new Fixture {
     withTwoUsers {
-      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
         user1 ! Connect(username1, user1Pass)
         val user1Listener = newEventListener
         user1 ! RegisterEventListener(user1Listener.ref)
@@ -202,7 +202,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     val testMessage = "unique test message" + UUID.randomUUID
 
-    def withTwoUsers(block: ((User, Password), (User, Password)) ⇒ Unit): Unit = {
+    case class TwoUserContext(username1: User, user1Pass: Password, username2: User, user2Pass: Password)
+
+    def withTwoUsers(block: TwoUserContext ⇒ Unit): Unit = {
       val username1 = randomUsername
       val user1Pass = Password(username1.value)
       val username2 = randomUsername
@@ -213,7 +215,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       adminUser ! RegisterUser(username2, Password(username2.value))
 
       try {
-        block((username1, user1Pass), (username2, user2Pass))
+        block(TwoUserContext(username1, user1Pass, username2, user2Pass))
       } finally {
         user1 ! DeleteUser
         user2 ! DeleteUser
