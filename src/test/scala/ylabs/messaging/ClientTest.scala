@@ -7,6 +7,7 @@ import akka.pattern.ask
 import akka.testkit.{ TestActorRef, TestProbe }
 import akka.util.Timeout
 import java.util.UUID
+import org.jivesoftware.smack.packet.Presence
 import org.jivesoftware.smack.roster.Roster
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
@@ -78,7 +79,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  "enables XEP-0066 file transfers" taggedAs (org.scalatest.Tag("foo")) in new Fixture {
+  "enables XEP-0066 file transfers" in new Fixture {
     withTwoUsers {
       case ((username1, user1Pass), (username2, user2Pass)) ⇒
         user1 ! Connect(username1, user1Pass)
@@ -96,6 +97,54 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             message.getTo should startWith(username2.value)
             outOfBandData.url shouldBe fileUrl
             outOfBandData.desc shouldBe fileDescription
+        }
+    }
+  }
+
+  "provides information about who is online and offline (roster)" taggedAs (org.scalatest.Tag("foo")) in new Fixture {
+    withTwoUsers {
+      case ((username1, user1Pass), (username2, user2Pass)) ⇒
+        def getRoster: Roster = {
+          val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
+          Await.result(rosterFuture, 3 seconds).roster
+        }
+
+        user1 ! Connect(username1, user1Pass)
+        val user1Listener = newEventListener
+        user1 ! RegisterEventListener(user1Listener.ref)
+        user1Listener.ignoreMsg {
+          case _: MessageReceived     ⇒ true
+          case _: UserBecameAvailable ⇒ true
+        }
+
+        val user2Listener = newEventListener
+        user2 ! RegisterEventListener(user2Listener.ref)
+        user2 ! Connect(username2, user2Pass)
+
+        user1 ! SendMessage(username2, testMessage)
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+
+        // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
+        Thread.sleep(1000)
+
+        {
+          val roster = getRoster
+          roster.getEntries should have size 1
+          val entry = roster.getEntries.head
+          entry.getUser should startWith(username2.value)
+          roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
+        }
+
+        user2 ! Disconnect
+        // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
+        Thread.sleep(1000)
+
+        {
+          val roster = getRoster
+          roster.getEntries should have size 1
+          val entry = roster.getEntries.head
+          entry.getUser should startWith(username2.value)
+          roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
         }
     }
   }
