@@ -49,141 +49,100 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   "enables users to chat to each other" in new Fixture {
-    withTwoUsers {
-      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
-        user1 ! Connect(username1, user1Pass)
-        user2 ! Connect(username2, user2Pass)
-        val user2Listener = newEventListener
-        user2 ! RegisterEventListener(user2Listener.ref)
-
-        user1 ! SendMessage(username2, testMessage)
-
-        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+    withTwoConnectedUsers {
+      user1 ! SendMessage(username2, testMessage)
+      verifyMessageArrived(user2Listener, username1, username2, testMessage)
     }
   }
 
   "enables async chats (message recipient offline)" in new Fixture {
     withTwoUsers {
-      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
-        user1 ! Connect(username1, user1Pass)
-        val user2Listener = newEventListener
-        user2 ! RegisterEventListener(user2Listener.ref)
+      user1 ! Connect(username1, user1Pass)
+      val user2Listener = newEventListener
+      user2 ! RegisterEventListener(user2Listener.ref)
 
-        user1 ! SendMessage(username2, testMessage)
+      user1 ! SendMessage(username2, testMessage)
 
-        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
-        Thread.sleep(1000)
-        user2 ! Connect(username2, user2Pass)
+      // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
+      Thread.sleep(1000)
+      user2 ! Connect(username2, user2Pass)
 
-        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+      verifyMessageArrived(user2Listener, username1, username2, testMessage)
     }
   }
 
   "enables XEP-0066 file transfers" in new Fixture {
-    withTwoUsers {
-      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
-        user1 ! Connect(username1, user1Pass)
-        user2 ! Connect(username2, user2Pass)
-        val user2Listener = newEventListener
-        user2 ! RegisterEventListener(user2Listener.ref)
+    withTwoConnectedUsers {
+      val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
+      val fileDescription = Some("file description")
+      user1 ! SendFileMessage(username2, fileUrl, fileDescription)
 
-        val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
-        val fileDescription = Some("file description")
-        user1 ! SendFileMessage(username2, fileUrl, fileDescription)
-
-        user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
-          case FileMessageReceived(chat, message, outOfBandData) ⇒
-            chat.getParticipant should startWith(username1.value)
-            message.getTo should startWith(username2.value)
-            outOfBandData.url shouldBe fileUrl
-            outOfBandData.desc shouldBe fileDescription
-        }
+      user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
+        case FileMessageReceived(chat, message, outOfBandData) ⇒
+          chat.getParticipant should startWith(username1.value)
+          message.getTo should startWith(username2.value)
+          outOfBandData.url shouldBe fileUrl
+          outOfBandData.desc shouldBe fileDescription
+      }
     }
   }
 
   "provides information about who is online and offline (roster)" in new Fixture {
-    withTwoUsers {
-      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
-        def getRoster: Roster = {
-          val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
-          Await.result(rosterFuture, 3 seconds).roster
-        }
+    withTwoConnectedUsers {
+      user1 ! SendMessage(username2, testMessage)
+      verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-        user1 ! Connect(username1, user1Pass)
-        val user1Listener = newEventListener
-        user1 ! RegisterEventListener(user1Listener.ref)
-        user1Listener.ignoreMsg {
-          case _: MessageReceived     ⇒ true
-          case _: UserBecameAvailable ⇒ true
-        }
+      // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
+      Thread.sleep(1000)
 
-        val user2Listener = newEventListener
-        user2 ! RegisterEventListener(user2Listener.ref)
-        user2 ! Connect(username2, user2Pass)
+      {
+        val roster = getRoster
+        roster.getEntries should have size 1
+        val entry = roster.getEntries.head
+        entry.getUser should startWith(username2.value)
+        roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
+      }
 
-        user1 ! SendMessage(username2, testMessage)
-        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+      user2 ! Disconnect
+      // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
+      Thread.sleep(1000)
 
-        // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
-        Thread.sleep(1000)
+      {
+        val roster = getRoster
+        roster.getEntries should have size 1
+        val entry = roster.getEntries.head
+        entry.getUser should startWith(username2.value)
+        roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
+      }
 
-        {
-          val roster = getRoster
-          roster.getEntries should have size 1
-          val entry = roster.getEntries.head
-          entry.getUser should startWith(username2.value)
-          roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
-        }
-
-        user2 ! Disconnect
-        // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
-        Thread.sleep(1000)
-
-        {
-          val roster = getRoster
-          roster.getEntries should have size 1
-          val entry = roster.getEntries.head
-          entry.getUser should startWith(username2.value)
-          roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
-        }
+      def getRoster: Roster = {
+        val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
+        Await.result(rosterFuture, 3 seconds).roster
+      }
     }
   }
 
   "informs event listeners about chat partners becoming available / unavailable" in new Fixture {
-    withTwoUsers {
-      case TwoUserContext(username1, user1Pass, username2, user2Pass) ⇒
-        user1 ! Connect(username1, user1Pass)
-        val user1Listener = newEventListener
-        user1 ! RegisterEventListener(user1Listener.ref)
-        user1Listener.ignoreMsg {
-          case _: MessageReceived     ⇒ true
-          case _: UserBecameAvailable ⇒ true
-        }
+    withTwoConnectedUsers {
+      user1 ! SendMessage(username2, testMessage)
+      verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-        val user2Listener = newEventListener
-        user2 ! RegisterEventListener(user2Listener.ref)
-        user2 ! Connect(username2, user2Pass)
+      // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
+      Thread.sleep(1000)
 
-        user1 ! SendMessage(username2, testMessage)
-        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+      user2 ! Disconnect
+      user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
+        case UserBecameUnavailable(user) ⇒
+          user.value should startWith(username2.value)
+          true
+      }
 
-        // TODO: register for IQ messages being processed, or roster subscribed instead of sleeping
-        Thread.sleep(1000)
-
-        user2 ! Disconnect
-        user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
-          case UserBecameUnavailable(user) ⇒
-            user.value should startWith(username2.value)
-            true
-        }
-        user1Listener.ignoreNoMsg
-
-        user2 ! Connect(username2, user2Pass)
-        user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
-          case UserBecameAvailable(user) ⇒
-            user.value should startWith(username2.value)
-            true
-        }
+      user2 ! Connect(username2, user2Pass)
+      user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
+        case UserBecameAvailable(user) ⇒
+          user.value should startWith(username2.value)
+          true
+      }
     }
   }
 
@@ -191,6 +150,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     val adminUser = TestActorRef(Props[Client])
     val user1 = TestActorRef(Props[Client])
     val user2 = TestActorRef(Props[Client])
+    val username1 = randomUsername
+    val username2 = randomUsername
+    val user1Pass = Password(username1.value)
+    val user2Pass = Password(username2.value)
+    val user1Listener = newEventListener
+    val user2Listener = newEventListener
+
+    val testMessage = "unique test message" + UUID.randomUUID
 
     def newEventListener: TestProbe = {
       val eventListener = TestProbe()
@@ -200,27 +167,26 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       eventListener
     }
 
-    val testMessage = "unique test message" + UUID.randomUUID
-
-    case class TwoUserContext(username1: User, user1Pass: Password, username2: User, user2Pass: Password)
-
-    def withTwoUsers(block: TwoUserContext ⇒ Unit): Unit = {
-      val username1 = randomUsername
-      val user1Pass = Password(username1.value)
-      val username2 = randomUsername
-      val user2Pass = Password(username2.value)
-
+    def withTwoUsers(block: ⇒ Unit): Unit = {
       adminUser ! Connect(User(adminUsername), Password(adminPassword))
       adminUser ! RegisterUser(username1, Password(username1.value))
       adminUser ! RegisterUser(username2, Password(username2.value))
 
+      user1 ! RegisterEventListener(user1Listener.ref)
+      user2 ! RegisterEventListener(user2Listener.ref)
       try {
-        block(TwoUserContext(username1, user1Pass, username2, user2Pass))
+        block
       } finally {
         user1 ! DeleteUser
         user2 ! DeleteUser
       }
     }
+
+    def withTwoConnectedUsers(block: ⇒ Unit): Unit =
+      withTwoUsers {
+        user1 ! Connect(username1, user1Pass)
+        user2 ! Connect(username2, user2Pass)
+      }
 
     def verifyMessageArrived(testProbe: TestProbe, sender: User, recipient: User, messageBody: String): Unit = {
       testProbe.fishForMessage(3 seconds, "expected message to be delivered") {
