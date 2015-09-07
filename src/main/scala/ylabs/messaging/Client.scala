@@ -102,15 +102,13 @@ class Client extends FSM[State, Context] {
       stay
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
-      val chat = chats.get(recipient)
-        .getOrElse(createChat(connection, recipient))
+      val chat = chats.getOrElse(key = recipient, createChat(connection, recipient))
       chat.sendMessage(message)
       log.info(s"message sent to $recipient")
       stay using ctx.copy(chats = chats + (recipient → chat))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
-      val chat = ctx.chats.get(recipient)
-        .getOrElse(createChat(ctx.connection.get, recipient))
+      val chat = ctx.chats.getOrElse(key = recipient, createChat(ctx.connection.get, recipient))
       val fileInformation = OutOfBandData(fileUrl, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
