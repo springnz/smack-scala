@@ -22,3 +22,9 @@ libraryDependencies ++= Seq(
   "org.scala-lang" % "scala-reflect" % "2.11.7",
   "org.scala-lang.modules" %% "scala-xml" % "1.0.4"
 )
+
+val repo = "https://nexus.prod.corp/content"
+publishTo <<= version { (v: String) ⇒
+  if (v.trim.endsWith("SNAPSHOT")) Some("snapshots" at s"$repo/repositories/snapshots")
+  else Some("releases" at s"$repo/repositories/releases")
+}
