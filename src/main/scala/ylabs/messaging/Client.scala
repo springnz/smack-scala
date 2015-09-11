@@ -62,6 +62,15 @@ class Client extends FSM[State, Context] {
   lazy val domain = config.getString(ConfigKeys.domain)
   lazy val host = config.getString(ConfigKeys.host)
 
+  def splitUserIntoNameAndDomain(user: User):(String, String) = {
+    val (u ,d) = user.value.span(c => c != '@')
+    (u, if(d.isEmpty()) domain else d  )
+  }
+  def getFullyQualifiedUser(user: User):String = {
+    val (u, _) = splitUserIntoNameAndDomain(user)
+    s"${u}@$domain" //For now only use the domain in the configuration regardless of what the user types
+  }
+
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
       Try { connect(c.user, c.password) } match {
@@ -122,7 +131,8 @@ class Client extends FSM[State, Context] {
       log.info(s"trying to register ${register.user}")
       val accountManager = AccountManager.getInstance(connection)
       Try {
-        accountManager.createAccount(register.user.value.takeWhile(c => c != '@'), register.password.value)
+        val (username, _) = splitUserIntoNameAndDomain(register.user)
+        accountManager.createAccount(username, register.password.value)
       } match {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
         case Failure(t) ⇒ log.error(t, s"could not register ${register.user}!")
@@ -147,9 +157,10 @@ class Client extends FSM[State, Context] {
   }
 
   def connect(user: User, password: Password): XMPPTCPConnection = {
+    val (username, _) = splitUserIntoNameAndDomain(user)
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
-      .setUsernameAndPassword(user.value.takeWhile(c => c != '@'), password.value)
+      .setUsernameAndPassword(username, password.value)
       .setServiceName(domain)
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
@@ -184,7 +195,7 @@ class Client extends FSM[State, Context] {
 
   def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
-    val chat = chatManager.createChat(s"${recipient.value.takeWhile(c => c != '@')}@$domain")
+    val chat = chatManager.createChat(getFullyQualifiedUser(recipient))
     chat.addMessageListener(chatMessageListener)
     log.debug(s"chat with $recipient created")
     subscribeToStatus(connection, recipient)
@@ -192,7 +203,7 @@ class Client extends FSM[State, Context] {
   }
 
   def subscribeToStatus(connection: XMPPTCPConnection, user: User): Unit = {
-    val username = s"${user.value.takeWhile(c => c != '@')}@$domain"
+    val username = getFullyQualifiedUser(user)
     val roster = Roster.getInstanceFor(connection)
     if (!roster.getEntries.contains(username)) {
       val presence = new Presence(Presence.Type.subscribe)
