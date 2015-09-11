@@ -122,7 +122,7 @@ class Client extends FSM[State, Context] {
       log.info(s"trying to register ${register.user}")
       val accountManager = AccountManager.getInstance(connection)
       Try {
-        accountManager.createAccount(register.user.value, register.password.value)
+        accountManager.createAccount(register.user.value.takeWhile(c => c != '@'), register.password.value)
       } match {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
         case Failure(t) ⇒ log.error(t, s"could not register ${register.user}!")
@@ -149,7 +149,7 @@ class Client extends FSM[State, Context] {
   def connect(user: User, password: Password): XMPPTCPConnection = {
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
-      .setUsernameAndPassword(user.value, password.value)
+      .setUsernameAndPassword(user.value.takeWhile(c => c != '@'), password.value)
       .setServiceName(domain)
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
@@ -184,7 +184,7 @@ class Client extends FSM[State, Context] {
 
   def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
-    val chat = chatManager.createChat(s"${recipient.value}@$domain")
+    val chat = chatManager.createChat(s"${recipient.value.takeWhile(c => c != '@')}@$domain")
     chat.addMessageListener(chatMessageListener)
     log.debug(s"chat with $recipient created")
     subscribeToStatus(connection, recipient)
