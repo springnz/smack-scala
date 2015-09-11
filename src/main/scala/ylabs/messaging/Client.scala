@@ -192,7 +192,7 @@ class Client extends FSM[State, Context] {
   }
 
   def subscribeToStatus(connection: XMPPTCPConnection, user: User): Unit = {
-    val username = s"${user.value}@$domain"
+    val username = s"${user.value.takeWhile(c => c != '@')}@$domain"
     val roster = Roster.getInstanceFor(connection)
     if (!roster.getEntries.contains(username)) {
       val presence = new Presence(Presence.Type.subscribe)
