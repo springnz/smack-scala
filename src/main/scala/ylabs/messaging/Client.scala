@@ -63,12 +63,13 @@ class Client extends FSM[State, Context] {
   lazy val host = config.getString(ConfigKeys.host)
 
   def splitUserIntoNameAndDomain(user: User):(String, String) = {
-    val (u ,d) = user.value.span(c => c != '@')
-    (u, if(d.isEmpty()) domain else d  )
+    val (u ,_) = user.value.span(c => c != '@')
+    (u, domain) //for now only use the domain in the configuration regardless of what the user types
+    // (u, if(d.isEmpty()) domain else d  )
   }
   def getFullyQualifiedUser(user: User):String = {
-    val (u, _) = splitUserIntoNameAndDomain(user)
-    s"${u}@$domain" //For now only use the domain in the configuration regardless of what the user types
+    val (u, d) = splitUserIntoNameAndDomain(user)
+    s"${u}@$d" //For now only use the domain in the configuration regardless of what the user types
   }
 
   when(Unconnected) {
@@ -157,7 +158,7 @@ class Client extends FSM[State, Context] {
   }
 
   def connect(user: User, password: Password): XMPPTCPConnection = {
-    val (username, _) = splitUserIntoNameAndDomain(user)
+    val (username, domain) = splitUserIntoNameAndDomain(user)
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
       .setUsernameAndPassword(username, password.value)
