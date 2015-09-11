@@ -30,272 +30,198 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   val adminPassword = config.getString("messaging.admin.password")
   val domain = config.getString("messaging.domain")
 
-
-
   "A client" when {
     "usernames don't have domains " should {
-      "connects to the xmpp server" in new Fixture {
-        val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
-        connected.value.get shouldBe Success(Connected)
-        adminUser ! Disconnect
+      "connects to the xmpp server" in new TestFunctions {
+        connected
       }
 
-      "allows user registration and deletion" in new Fixture {
-        val username = randomUsername
-        val userPass = Password(username.value)
-
-        val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
-        adminUser ! RegisterUser(username, userPass)
-
-        val connected1 = user1 ? Connect(username, userPass)
-        connected1.value.get shouldBe Success(Connected)
-
-        user1 ! DeleteUser
-        val connected2 = user1 ? Connect(username, userPass)
-        connected2.value.get.get match {
-          case ConnectError(t) ⇒ //that's all we want to check
-        }
+      "allows user registration and deletion" in new TestFunctions {
+        registration
       }
 
-      "enables users to chat to each other" in new Fixture {
-        withTwoConnectedUsers {
-          user1 ! SendMessage(username2, testMessage)
-          verifyMessageArrived(user2Listener, username1, username2, testMessage)
-        }
+      "enables users to chat to each other" in new TestFunctions {
+        chat
       }
 
-      "enables async chats (message recipient offline)" in new Fixture {
-        withTwoUsers {
-          user1 ! Connect(username1, user1Pass)
-          val user2Listener = newEventListener
-          user2 ! RegisterEventListener(user2Listener.ref)
-
-          user1 ! SendMessage(username2, testMessage)
-
-          // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
-          Thread.sleep(1000)
-          user2 ! Connect(username2, user2Pass)
-
-          verifyMessageArrived(user2Listener, username1, username2, testMessage)
-        }
+      "enables async chats (message recipient offline)" in new TestFunctions {
+        asyncChat
       }
 
-      "enables XEP-0066 file transfers" in new Fixture {
-        withTwoConnectedUsers {
-          val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
-          val fileDescription = Some("file description")
-          user1 ! SendFileMessage(username2, fileUrl, fileDescription)
-
-          user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
-            case FileMessageReceived(chat, message, outOfBandData) ⇒
-              chat.getParticipant should startWith(username1.value)
-              message.getTo should startWith(username2.value)
-              outOfBandData.url shouldBe fileUrl
-              outOfBandData.desc shouldBe fileDescription
-          }
-        }
+      "enables XEP-0066 file transfers" in new TestFunctions {
+        XEP_0066_FileTransfers
       }
 
-      "informs event listeners about chat partners becoming available / unavailable" in new Fixture {
-        withTwoConnectedUsers {
-          user1 ! SendMessage(username2, testMessage)
-          verifyMessageArrived(user2Listener, username1, username2, testMessage)
-          user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
-            case UserBecameAvailable(user) ⇒
-              user.value should startWith(username2.value)
-              true
-          }
-
-          user2 ! Disconnect
-          user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
-            case UserBecameUnavailable(user) ⇒
-              user.value should startWith(username2.value)
-              true
-          }
-
-          user2 ! Connect(username2, user2Pass)
-          user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
-            case UserBecameAvailable(user) ⇒
-              user.value should startWith(username2.value)
-              true
-          }
-        }
+      "informs event listeners about chat partners becoming available / unavailable" in new TestFunctions {
+        availability
       }
 
-      "provides information about who is online and offline (roster)" in new Fixture {
-        withTwoConnectedUsers {
-          user1 ! SendMessage(username2, testMessage)
-          verifyMessageArrived(user2Listener, username1, username2, testMessage)
-
-          user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster"){
-            case UserBecameAvailable(user) =>
-              val roster = getRoster
-              roster.getEntries should have size 1
-              val entry = roster.getEntries.head
-              entry.getUser should startWith(username2.value)
-              roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
-              true
-          }
-
-          user2 ! Disconnect
-          user1Listener.fishForMessage(3 seconds, "notification that user2 is not in roster") {
-            case UserBecameUnavailable(user) =>
-              val roster = getRoster
-              roster.getEntries should have size 1
-              val entry = roster.getEntries.head
-              entry.getUser should startWith(username2.value)
-              roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
-              true
-          }
-
-          def getRoster: Roster = {
-            val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
-            Await.result(rosterFuture, 3 seconds).roster
-          }
-
-        }
+      "provides information about who is online and offline (roster)" in new TestFunctions {
+        roster
       }
     }
 
     "usernames have domains " should {
-      "connects to the xmpp server"  in new FixtureWithDomain {
-        val connected = adminUser ? Connect(User(s"$adminUsername@$domain"), Password(adminPassword))
-        connected.value.get shouldBe Success(Connected)
-        adminUser ! Disconnect
+      "connects to the xmpp server"  in new TestFunctionsWithDomain {
+        connected
       }
 
-      "connects to the xmpp server allows user registration" in new FixtureWithDomain {
-        val username = username1
-        val userPass = Password(username.value)
-
-        val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
-        adminUser ! RegisterUser(username, userPass)
-
-        val connected1 = user1 ? Connect(username, userPass)
-        connected1.value.get shouldBe Success(Connected)
-
-        user1 ! DeleteUser
-        val connected2 = user1 ? Connect(username, userPass)
-        connected2.value.get.get match {
-          case ConnectError(t) ⇒ //that's all we want to check
-        }
+      "connects to the xmpp server allows user registration" in new TestFunctionsWithDomain {
+        registration
       }
 
-      "connects to the xmpp server enables users to chat to each other" in new FixtureWithDomain {
-        withTwoConnectedUsers {
-          user1 ! SendMessage(username2, testMessage)
-          verifyMessageArrived(user2Listener, username1, username2, testMessage)
-        }
+      "connects to the xmpp server enables users to chat to each other" in new TestFunctionsWithDomain {
+        chat
       }
 
-      "connects to the xmpp server enables async chats (message recipient offline)" in new FixtureWithDomain {
-        withTwoUsers {
-          user1 ! Connect(username1, user1Pass)
-          val user2Listener = newEventListener
-          user2 ! RegisterEventListener(user2Listener.ref)
-
-          user1 ! SendMessage(username2, testMessage)
-
-          // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
-          Thread.sleep(1000)
-          user2 ! Connect(username2, user2Pass)
-
-          verifyMessageArrived(user2Listener, username1, username2, testMessage)
-        }
+      "connects to the xmpp server enables async chats (message recipient offline)" in new TestFunctionsWithDomain {
+        asyncChat
       }
 
-      "connect to the xmpp server enables XEP-0066 file transfers" in new FixtureWithDomain {
-        withTwoConnectedUsers {
-          val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
-          val fileDescription = Some("file description")
-          user1 ! SendFileMessage(username2, fileUrl, fileDescription)
-
-          user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
-            case FileMessageReceived(chat, message, outOfBandData) ⇒
-              chat.getParticipant should startWith(username1.value)
-              message.getTo should startWith(username2.value)
-              outOfBandData.url shouldBe fileUrl
-              outOfBandData.desc shouldBe fileDescription
-          }
-        }
+      "connect to the xmpp server enables XEP-0066 file transfers" in new TestFunctionsWithDomain {
+        XEP_0066_FileTransfers
       }
 
-      "connects to the xmpp server informs event listeners about chat partners becoming available / unavailable" in new FixtureWithDomain {
-        withTwoConnectedUsers {
-          user1 ! SendMessage(username2, testMessage)
-          verifyMessageArrived(user2Listener, username1, username2, testMessage)
-          user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
-            case UserBecameAvailable(user) ⇒
-              user.value should startWith(username2.value)
-              true
-          }
-
-          user2 ! Disconnect
-          user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
-            case UserBecameUnavailable(user) ⇒
-              user.value should startWith(username2.value)
-              true
-          }
-
-          user2 ! Connect(username2, user2Pass)
-          user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
-            case UserBecameAvailable(user) ⇒
-              user.value should startWith(username2.value)
-              true
-          }
-        }
+      "connects to the xmpp server informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
+        availability
       }
 
-      "connects to the xmpp server provides information about who is online and offline (roster)" in new FixtureWithDomain {
-        withTwoConnectedUsers {
-          user1 ! SendMessage(username2, testMessage)
-          verifyMessageArrived(user2Listener, username1, username2, testMessage)
-
-          user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster"){
-            case UserBecameAvailable(user) =>
-              val roster = getRoster
-              roster.getEntries should have size 1
-              val entry = roster.getEntries.head
-              entry.getUser should startWith(username2.value)
-              roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
-              true
-          }
-
-          user2 ! Disconnect
-          user1Listener.fishForMessage(3 seconds, "notification that user2 is not in roster") {
-            case UserBecameUnavailable(user) =>
-              val roster = getRoster
-              roster.getEntries should have size 1
-              val entry = roster.getEntries.head
-              entry.getUser should startWith(username2.value)
-              roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
-              true
-          }
-
-          def getRoster: Roster = {
-            val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
-            Await.result(rosterFuture, 3 seconds).roster
-          }
-
-        }
+      "connects to the xmpp server provides information about who is online and offline (roster)" in new TestFunctionsWithDomain {
+        roster
       }
     }
   }
 
 
+  class TestFunctions extends AnyRef with Fixture {
+      def connected:Unit = {
+        val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+        connected.value.get shouldBe Success(Connected)
+        adminUser ! Disconnect
+      }
 
+     def registration:Unit = {
+       val username = randomUsername
+       val userPass = Password(username.value)
 
+       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+       adminUser ! RegisterUser(username, userPass)
 
+       val connected1 = user1 ? Connect(username, userPass)
+       connected1.value.get shouldBe Success(Connected)
 
+       user1 ! DeleteUser
+       val connected2 = user1 ? Connect(username, userPass)
+       connected2.value.get.get match {
+         case ConnectError(t) ⇒ //that's all we want to check
+       }
+     }
 
+    def chat:Unit = {
+      withTwoConnectedUsers {
+        user1 ! SendMessage(username2, testMessage)
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+      }
+    }
 
+    def asyncChat: Unit = {
+      withTwoUsers {
+        user1 ! Connect(username1, user1Pass)
+        val user2Listener = newEventListener
+        user2 ! RegisterEventListener(user2Listener.ref)
 
+        user1 ! SendMessage(username2, testMessage)
 
+        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
+        Thread.sleep(1000)
+        user2 ! Connect(username2, user2Pass)
 
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+      }
+    }
 
+    def XEP_0066_FileTransfers = {
+      withTwoConnectedUsers {
+        val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
+        val fileDescription = Some("file description")
+        user1 ! SendFileMessage(username2, fileUrl, fileDescription)
 
+        user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
+          case FileMessageReceived(chat, message, outOfBandData) ⇒
+            chat.getParticipant should startWith(username1.value)
+            message.getTo should startWith(username2.value)
+            outOfBandData.url shouldBe fileUrl
+            outOfBandData.desc shouldBe fileDescription
+        }
+      }
+    }
 
+    def availability = {
+      withTwoConnectedUsers {
+        user1 ! SendMessage(username2, testMessage)
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
+          case UserBecameAvailable(user) ⇒
+            user.value should startWith(username2.value)
+            true
+        }
 
+        user2 ! Disconnect
+        user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
+          case UserBecameUnavailable(user) ⇒
+            user.value should startWith(username2.value)
+            true
+        }
+
+        user2 ! Connect(username2, user2Pass)
+        user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
+          case UserBecameAvailable(user) ⇒
+            user.value should startWith(username2.value)
+            true
+        }
+      }
+    }
+
+    def roster = {
+      withTwoConnectedUsers {
+        user1 ! SendMessage(username2, testMessage)
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+
+        user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster"){
+          case UserBecameAvailable(user) =>
+            val roster = getRoster
+            roster.getEntries should have size 1
+            val entry = roster.getEntries.head
+            entry.getUser should startWith(username2.value)
+            roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
+            true
+        }
+
+        user2 ! Disconnect
+        user1Listener.fishForMessage(3 seconds, "notification that user2 is not in roster") {
+          case UserBecameUnavailable(user) =>
+            val roster = getRoster
+            roster.getEntries should have size 1
+            val entry = roster.getEntries.head
+            entry.getUser should startWith(username2.value)
+            roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
+            true
+        }
+
+        def getRoster: Roster = {
+          val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
+          Await.result(rosterFuture, 3 seconds).roster
+        }
+
+      }
+    }
+  }
+
+  class TestFunctionsWithDomain extends TestFunctions with FixtureWithDomain{
+    assert(username1.value.contains("@"))
+    assert(username2.value.contains("@"))
+  }
+  
 
   trait Fixture {
     val adminUser = TestActorRef(Props[Client])
