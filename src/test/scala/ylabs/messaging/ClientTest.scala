@@ -89,40 +89,15 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  "provides information about who is online and offline (roster)" in new Fixture {
-    withTwoConnectedUsers {
-      user1 ! SendMessage(username2, testMessage)
-      verifyMessageArrived(user2Listener, username1, username2, testMessage)
-
-      {
-        val roster = getRoster
-        roster.getEntries should have size 1
-        val entry = roster.getEntries.head
-        entry.getUser should startWith(username2.value)
-        roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
-      }
-
-      user2 ! Disconnect
-
-      {
-        val roster = getRoster
-        roster.getEntries should have size 1
-        val entry = roster.getEntries.head
-        entry.getUser should startWith(username2.value)
-        roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
-      }
-
-      def getRoster: Roster = {
-        val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
-        Await.result(rosterFuture, 3 seconds).roster
-      }
-    }
-  }
-
   "informs event listeners about chat partners becoming available / unavailable" in new Fixture {
     withTwoConnectedUsers {
       user1 ! SendMessage(username2, testMessage)
       verifyMessageArrived(user2Listener, username1, username2, testMessage)
+      user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
+        case UserBecameAvailable(user) ⇒
+          user.value should startWith(username2.value)
+          true
+      }
 
       user2 ! Disconnect
       user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
@@ -137,6 +112,40 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           user.value should startWith(username2.value)
           true
       }
+    }
+  }
+
+  "provides information about who is online and offline (roster)" in new Fixture {
+    withTwoConnectedUsers {
+      user1 ! SendMessage(username2, testMessage)
+      verifyMessageArrived(user2Listener, username1, username2, testMessage)
+
+      user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster"){
+        case UserBecameAvailable(user) =>
+          val roster = getRoster
+          roster.getEntries should have size 1
+          val entry = roster.getEntries.head
+          entry.getUser should startWith(username2.value)
+          roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
+          true
+      }
+
+      user2 ! Disconnect
+      user1Listener.fishForMessage(3 seconds, "notification that user2 is not in roster") {
+        case UserBecameUnavailable(user) =>
+          val roster = getRoster
+          roster.getEntries should have size 1
+          val entry = roster.getEntries.head
+          entry.getUser should startWith(username2.value)
+          roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
+          true
+      }
+
+      def getRoster: Roster = {
+        val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
+        Await.result(rosterFuture, 3 seconds).roster
+      }
+
     }
   }
 
@@ -180,6 +189,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       withTwoUsers {
         user1 ! Connect(username1, user1Pass)
         user2 ! Connect(username2, user2Pass)
+        block
       }
 
     def verifyMessageArrived(testProbe: TestProbe, sender: User, recipient: User, messageBody: String): Unit = {
