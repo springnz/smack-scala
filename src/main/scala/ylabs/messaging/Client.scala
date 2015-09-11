@@ -22,6 +22,9 @@ object Client {
 
   case class User(value: String) extends AnyVal
   case class Password(value: String) extends AnyVal
+  case class Domain(value: String) extends  AnyVal
+  case class UserWithoutDomain(value: String) extends AnyVal
+  case class UserWithDomain(value: String) extends AnyVal
 
   sealed trait State
   case object Unconnected extends State
@@ -62,14 +65,13 @@ class Client extends FSM[State, Context] {
   lazy val domain = config.getString(ConfigKeys.domain)
   lazy val host = config.getString(ConfigKeys.host)
 
-  def splitUserIntoNameAndDomain(user: User):(String, String) = {
+  def splitUserIntoNameAndDomain(user: User):(UserWithoutDomain, Domain) = {
     val (u ,_) = user.value.span(c => c != '@')
-    (u, domain) //for now only use the domain in the configuration regardless of what the user types
-    // (u, if(d.isEmpty()) domain else d  )
+    (new UserWithoutDomain(u), Domain(domain))
   }
-  def getFullyQualifiedUser(user: User):String = {
+  def getFullyQualifiedUser(user: User):UserWithDomain = {
     val (u, d) = splitUserIntoNameAndDomain(user)
-    s"${u}@$d" //For now only use the domain in the configuration regardless of what the user types
+    UserWithDomain(s"${u.value}@${d.value}")
   }
 
   when(Unconnected) {
@@ -133,7 +135,7 @@ class Client extends FSM[State, Context] {
       val accountManager = AccountManager.getInstance(connection)
       Try {
         val (username, _) = splitUserIntoNameAndDomain(register.user)
-        accountManager.createAccount(username, register.password.value)
+        accountManager.createAccount(username.value, register.password.value)
       } match {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
         case Failure(t) ⇒ log.error(t, s"could not register ${register.user}!")
@@ -161,8 +163,8 @@ class Client extends FSM[State, Context] {
     val (username, domain) = splitUserIntoNameAndDomain(user)
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
-      .setUsernameAndPassword(username, password.value)
-      .setServiceName(domain)
+      .setUsernameAndPassword(username.value, password.value)
+      .setServiceName(domain.value)
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
       .setSendPresence(true)
@@ -196,7 +198,7 @@ class Client extends FSM[State, Context] {
 
   def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
-    val chat = chatManager.createChat(getFullyQualifiedUser(recipient))
+    val chat = chatManager.createChat(getFullyQualifiedUser(recipient).value)
     chat.addMessageListener(chatMessageListener)
     log.debug(s"chat with $recipient created")
     subscribeToStatus(connection, recipient)
@@ -204,7 +206,7 @@ class Client extends FSM[State, Context] {
   }
 
   def subscribeToStatus(connection: XMPPTCPConnection, user: User): Unit = {
-    val username = getFullyQualifiedUser(user)
+    val username = getFullyQualifiedUser(user).value
     val roster = Roster.getInstanceFor(connection)
     if (!roster.getEntries.contains(username)) {
       val presence = new Presence(Presence.Type.subscribe)
