@@ -163,7 +163,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   "with user domain connects to the xmpp server allows user registration" in new FixtureWithDomain {
     val username = username1
     val userPass = Password(username.value)
-    println(username)
 
     val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
     adminUser ! RegisterUser(username, userPass)
@@ -335,6 +334,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   trait FixtureWithDomain extends Fixture {
     override val username1 = nameWithDomain(randomUsername)
     override val username2 = nameWithDomain(randomUsername)
+    override val user1Pass = Password(username1.value)
+    override val user2Pass = Password(username2.value)
   }
 
   def randomUsername = User(s"testuser-${UUID.randomUUID.toString.substring(9)}")
