@@ -59,6 +59,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       "provides information about who is online and offline (roster)" in new TestFunctions {
         roster
       }
+
+      "message receiver initiates chat" taggedAs(org.scalatest.Tag("foo"))in new TestFunctions {
+        receiver_connects
+      }
     }
 
     "usernames have domains " should {
@@ -66,28 +70,32 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         connected
       }
 
-      "connects to the xmpp server allows user registration" in new TestFunctionsWithDomain {
+      "allows user registration" in new TestFunctionsWithDomain {
         registration
       }
 
-      "connects to the xmpp server enables users to chat to each other" in new TestFunctionsWithDomain {
+      "enables users to chat to each other" in new TestFunctionsWithDomain {
         chat
       }
 
-      "connects to the xmpp server enables async chats (message recipient offline)" in new TestFunctionsWithDomain {
+      "enables async chats (message recipient offline)" in new TestFunctionsWithDomain {
         asyncChat
       }
 
-      "connect to the xmpp server enables XEP-0066 file transfers" in new TestFunctionsWithDomain {
+      "enables XEP-0066 file transfers" in new TestFunctionsWithDomain {
         XEP_0066_FileTransfers
       }
 
-      "connects to the xmpp server informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
+      "informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
         availability
       }
 
-      "connects to the xmpp server provides information about who is online and offline (roster)" in new TestFunctionsWithDomain {
+      "provides information about who is online and offline (roster)" in new TestFunctionsWithDomain {
         roster
+      }
+
+      "message receiver initiates chat" taggedAs(org.scalatest.Tag("foo"))in new TestFunctionsWithDomain {
+        receiver_connects
       }
     }
   }
@@ -207,13 +215,29 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
             true
         }
-
-        def getRoster: Roster = {
-          val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
-          Await.result(rosterFuture, 3 seconds).roster
-        }
-
       }
+    }
+
+    def receiver_connects = {
+      withTwoConnectedUsers {
+       user1 ! SendMessage(username2, testMessage)
+       verifyMessageArrived(user2Listener, username1, username2, testMessage)
+
+        user2Listener.fishForMessage(3 seconds, "notification that user1 is in roster"){
+          case UserBecameAvailable(user) =>
+            val roster = getRoster
+            roster.getEntries should have size 1
+            val entry = roster.getEntries.head
+            entry.getUser should startWith(username1.value)
+            roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
+            true
+        }
+      }
+    }
+
+    private def getRoster: Roster = {
+      val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
+      Await.result(rosterFuture, 3 seconds).roster
     }
   }
 
