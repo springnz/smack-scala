@@ -109,7 +109,15 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterEventListener(actor), ctx) ⇒
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
-    case Event(msg: Messages.ListenerEvent, ctx) ⇒
+    case Event(msg: Messages.ListenerEvent, ctx @ Context(Some(connection), chats, _)) ⇒
+      msg match {
+        case Messages.MessageReceived(chat, message) =>
+          println("SUBSCRIBE")
+          println("Subscribing to " + chat.getParticipant)
+          println("From user " + connection.getUser)
+          subscribeToStatus(connection, User(chat.getParticipant))
+        case msg: Messages.ListenerEvent =>
+      }
       ctx.eventListeners foreach { _ ! msg }
       stay
 
@@ -157,6 +165,9 @@ class Client extends FSM[State, Context] {
       val roster = Roster.getInstanceFor(connection)
       sender ! Messages.GetRosterResponse(roster)
       stay
+
+
+
   }
 
   def connect(user: User, password: Password): XMPPTCPConnection = {
@@ -199,13 +210,13 @@ class Client extends FSM[State, Context] {
   def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
     val chat = chatManager.createChat(getFullyQualifiedUser(recipient).value)
-    chat.addMessageListener(chatMessageListener)
     log.debug(s"chat with $recipient created")
     subscribeToStatus(connection, recipient)
     chat
   }
 
   def subscribeToStatus(connection: XMPPTCPConnection, user: User): Unit = {
+
     val username = getFullyQualifiedUser(user).value
     val roster = Roster.getInstanceFor(connection)
     if (!roster.getEntries.contains(username)) {
