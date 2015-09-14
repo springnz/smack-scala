@@ -14,7 +14,7 @@ import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfigur
 import org.jivesoftware.smackx.iqregister.AccountManager
 import scala.collection.JavaConversions._
 import scala.util.{ Failure, Success, Try }
-import akka.actor.Status.{ Failure => ActorFailure }
+import akka.actor.Status.{ Failure ⇒ ActorFailure }
 
 object Client {
   object ConfigKeys {
@@ -72,7 +72,7 @@ class Client extends FSM[State, Context] {
   lazy val host = config.getString(ConfigKeys.host)
 
   def splitUserIntoNameAndDomain(user: User): (UserWithoutDomain, Domain) = {
-    val (u, _) = user.value.span(c => c != '@')
+    val (u, _) = user.value.span(c ⇒ c != '@')
     (new UserWithoutDomain(u), Domain(domain))
   }
   def getFullyQualifiedUser(u: UserWithoutDomain, d: Domain): UserWithDomain = {
@@ -116,10 +116,10 @@ class Client extends FSM[State, Context] {
 
     case Event(msg: Messages.ListenerEvent, Context(Some(connection), _, eventListeners)) ⇒
       msg match {
-        case Messages.MessageReceived(chat, message) =>
+        case Messages.MessageReceived(chat, message) ⇒
           val (user, domain) = splitUserIntoNameAndDomain(User(chat.getParticipant))
           subscribeToStatus(connection, user, domain)
-        case msg: Messages.ListenerEvent =>
+        case msg: Messages.ListenerEvent ⇒
       }
       eventListeners foreach { _ ! msg }
       stay
@@ -155,13 +155,13 @@ class Client extends FSM[State, Context] {
         case Failure(t) ⇒
           log.error(t, s"could not register ${register.user}!")
           val response: ActorFailure = t match {
-            case ex: Messages.InvalidUserName => ActorFailure(ex)
-            case ex: XMPPErrorException =>
+            case ex: Messages.InvalidUserName ⇒ ActorFailure(ex)
+            case ex: XMPPErrorException ⇒
               if (ex.getXMPPError.getCondition == XMPPError.Condition.conflict && ex.getXMPPError.getType == XMPPError.Type.CANCEL)
                 ActorFailure(Messages.DuplicateUser(register.user))
               else ActorFailure(Messages.GeneralSmackError(t))
 
-            case _ => ActorFailure(t)
+            case _ ⇒ ActorFailure(t)
           }
           sender ! response
 
