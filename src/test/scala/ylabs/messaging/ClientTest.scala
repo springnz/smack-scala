@@ -44,6 +44,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         same_registration
       }
 
+      "should reject registration with username same as domain" in new TestFunctions {
+        invalid_registration
+      }
+
       "enables users to chat to each other"  in new TestFunctions {
         chat
       }
@@ -76,6 +80,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "should reject duplicate registration" in new TestFunctionsWithDomain {
         same_registration
+      }
+
+      "should reject registration with username same as domain" in new TestFunctions {
+        invalid_registration
       }
 
       "connects to the xmpp server enables users to chat to each other" in new TestFunctionsWithDomain {
@@ -135,6 +143,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       registration.value.get shouldBe Failure(DuplicateUser(username))
     }
 
+    def invalid_registration:Unit = {
+      val username = User(domain);
+      val userPass = Password(username.value)
+
+      val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+      val registration = adminUser ? RegisterUser(username, userPass)
+      registration.value.get shouldBe Failure(InvalidUserName(username))
+    }
 
     def chat:Unit = {
       withTwoConnectedUsers {
