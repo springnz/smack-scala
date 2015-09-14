@@ -114,8 +114,14 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterEventListener(actor), ctx) ⇒
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
-    case Event(msg: Messages.ListenerEvent, ctx) ⇒
-      ctx.eventListeners foreach { _ ! msg }
+    case Event(msg: Messages.ListenerEvent, Context(Some(connection), _, eventListeners)) ⇒
+      msg match {
+        case Messages.MessageReceived(chat, message) =>
+          val (user, domain) = splitUserIntoNameAndDomain(User(chat.getParticipant))
+          subscribeToStatus(connection, user, domain)
+        case msg: Messages.ListenerEvent =>
+      }
+      eventListeners foreach { _ ! msg }
       stay
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
@@ -218,21 +224,22 @@ class Client extends FSM[State, Context] {
   def createChat(connection: XMPPTCPConnection, recipient: UserWithoutDomain, domain: Domain): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
     val chat = chatManager.createChat(getFullyQualifiedUser(recipient, domain).value)
-    chat.addMessageListener(chatMessageListener)
     log.debug(s"chat with $recipient created")
     subscribeToStatus(connection, recipient, domain)
     chat
   }
 
   def subscribeToStatus(connection: XMPPTCPConnection, user: UserWithoutDomain, domain: Domain): Unit = {
-    val username = getFullyQualifiedUser(user, domain).value
-    val roster = Roster.getInstanceFor(connection)
-    if (!roster.getEntries.contains(username)) {
-      val presence = new Presence(Presence.Type.subscribe)
-      presence.setTo(username)
-      log.info(s"requesting roster presence permissions for $user")
-      connection.sendStanza(presence)
-      log.info(s"requested roster presence permissions for $user")
+    if(user.value != domain.value) {
+      val username = getFullyQualifiedUser(user, domain).value
+      val roster = Roster.getInstanceFor(connection)
+      if (!roster.getEntries.contains(username)) {
+        val presence = new Presence(Presence.Type.subscribe)
+        presence.setTo(username)
+        log.info(s"requesting roster presence permissions for $user")
+        connection.sendStanza(presence)
+        log.info(s"requested roster presence permissions for $user")
+      }
     }
   }
 
