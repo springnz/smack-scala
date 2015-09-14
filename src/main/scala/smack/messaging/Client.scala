@@ -6,13 +6,15 @@ import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import java.util.Collection
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
+import org.jivesoftware.smack.XMPPException.XMPPErrorException
 import org.jivesoftware.smack.chat._
-import org.jivesoftware.smack.packet.{ ExtensionElement, Message, Presence }
+import org.jivesoftware.smack.packet.{ XMPPError, ExtensionElement, Message, Presence }
 import org.jivesoftware.smack.roster.{ Roster, RosterListener }
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
 import scala.collection.JavaConversions._
 import scala.util.{ Failure, Success, Try }
+import akka.actor.Status.{ Failure => ActorFailure }
 
 object Client {
   object ConfigKeys {
@@ -22,7 +24,7 @@ object Client {
 
   case class User(value: String) extends AnyVal
   case class Password(value: String) extends AnyVal
-  case class Domain(value: String) extends  AnyVal
+  case class Domain(value: String) extends AnyVal
   case class UserWithoutDomain(value: String) extends AnyVal
   case class UserWithDomain(value: String) extends AnyVal
 
@@ -33,8 +35,7 @@ object Client {
   case class Context(
     connection: Option[XMPPTCPConnection],
     chats: Map[User, Chat],
-    eventListeners: Set[ActorRef]
-  )
+    eventListeners: Set[ActorRef])
 
   object Messages {
     case class RegisterUser(user: User, password: Password)
@@ -55,6 +56,11 @@ object Client {
     case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
+
+    sealed trait SmackError extends Throwable
+    case class DuplicateUser(user: User) extends SmackError
+    case class InvalidUserName(user: User) extends SmackError
+    case class GeneralSmackError(reason: Throwable) extends SmackError
   }
 }
 
@@ -65,11 +71,11 @@ class Client extends FSM[State, Context] {
   lazy val domain = config.getString(ConfigKeys.domain)
   lazy val host = config.getString(ConfigKeys.host)
 
-  def splitUserIntoNameAndDomain(user: User):(UserWithoutDomain, Domain) = {
-    val (u ,_) = user.value.span(c => c != '@')
+  def splitUserIntoNameAndDomain(user: User): (UserWithoutDomain, Domain) = {
+    val (u, _) = user.value.span(c => c != '@')
     (new UserWithoutDomain(u), Domain(domain))
   }
-  def getFullyQualifiedUser(u: UserWithoutDomain, d: Domain):UserWithDomain = {
+  def getFullyQualifiedUser(u: UserWithoutDomain, d: Domain): UserWithDomain = {
     UserWithDomain(s"${u.value}@${d.value}")
   }
 
@@ -142,10 +148,23 @@ class Client extends FSM[State, Context] {
       val accountManager = AccountManager.getInstance(connection)
       Try {
         val (username, _) = splitUserIntoNameAndDomain(register.user)
+        if (username.value == domain) throw new Messages.InvalidUserName(register.user)
         accountManager.createAccount(username.value, register.password.value)
       } match {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
-        case Failure(t) ⇒ log.error(t, s"could not register ${register.user}!")
+        case Failure(t) ⇒
+          log.error(t, s"could not register ${register.user}!")
+          val response: ActorFailure = t match {
+            case ex: Messages.InvalidUserName => ActorFailure(ex)
+            case ex: XMPPErrorException =>
+              if (ex.getXMPPError.getCondition == XMPPError.Condition.conflict && ex.getXMPPError.getType == XMPPError.Type.CANCEL)
+                ActorFailure(Messages.DuplicateUser(register.user))
+              else ActorFailure(Messages.GeneralSmackError(t))
+
+            case _ => ActorFailure(t)
+          }
+          sender ! response
+
       }
       stay
 
@@ -164,22 +183,18 @@ class Client extends FSM[State, Context] {
       val roster = Roster.getInstanceFor(connection)
       sender ! Messages.GetRosterResponse(roster)
       stay
-
-
-
   }
 
   def connect(user: User, password: Password): XMPPTCPConnection = {
     val (username, domain) = splitUserIntoNameAndDomain(user)
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
-      .setUsernameAndPassword(username.value, password.value)
-      .setServiceName(domain.value)
-      .setHost(host)
-      .setSecurityMode(SecurityMode.disabled)
-      .setSendPresence(true)
-      .build
-    )
+        .setUsernameAndPassword(username.value, password.value)
+        .setServiceName(domain.value)
+        .setHost(host)
+        .setSecurityMode(SecurityMode.disabled)
+        .setSendPresence(true)
+        .build)
     connection.connect().login()
     setupChatManager(connection)
     setupRosterListener(connection)
@@ -215,7 +230,7 @@ class Client extends FSM[State, Context] {
   }
 
   def subscribeToStatus(connection: XMPPTCPConnection, user: UserWithoutDomain, domain: Domain): Unit = {
-    if(user.value != domain.value) {
+    if (user.value != domain.value) {
       val username = getFullyQualifiedUser(user, domain).value
       val roster = Roster.getInstanceFor(connection)
       if (!roster.getEntries.contains(username)) {

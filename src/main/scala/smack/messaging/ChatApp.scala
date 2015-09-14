@@ -33,10 +33,10 @@ object ChatApp extends App {
         computerSays("`roster`   #get information about who is online at the moment")
         computerSays("`exit`     #get me out of here")
 
-      case "roster" =>
+      case "roster" ⇒
         val rosterFuture = (chattie ? GetRoster).mapTo[GetRosterResponse]
         val roster = Await.result(rosterFuture, 3 seconds).roster
-        roster.getEntries foreach { entry =>
+        roster.getEntries foreach { entry ⇒
           computerSays(s"presence: ${roster.getPresence(entry.getUser)}")
           computerSays(s"user: ${entry.getUser}")
         }
@@ -48,7 +48,7 @@ object ChatApp extends App {
         val message = io.StdIn.readLine
         chattie ! SendMessage(user, message)
 
-      case "file" =>
+      case "file" ⇒
         computerSays("Who do you want to send a file to, sir?")
         val user = User(io.StdIn.readLine)
         computerSays(s"What is the file url, sir?")
