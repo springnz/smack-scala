@@ -40,7 +40,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         registration
       }
 
-      "should reject duplicate registration" taggedAs (org.scalatest.Tag("foo")) in new TestFunctions {
+      "should reject duplicate registration" in new TestFunctions {
         same_registration
       }
 
@@ -72,6 +72,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "connects to the xmpp server allows user registration" in new TestFunctionsWithDomain {
         registration
+      }
+
+      "should reject duplicate registration" in new TestFunctionsWithDomain {
+        same_registration
       }
 
       "connects to the xmpp server enables users to chat to each other" in new TestFunctionsWithDomain {
