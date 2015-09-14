@@ -16,7 +16,7 @@ import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.util.{Failure, Success, Try}
+import scala.util.{ Failure, Success, Try }
 
 // this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
 // see http://docs.ejabberd.im/admin/guide/configuration/#modregister for more details
@@ -41,14 +41,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
 
       "should reject duplicate registration" in new TestFunctions {
-        same_registration
+        sameRegistration
       }
 
       "should reject registration with username same as domain" in new TestFunctions {
-        invalid_registration
+        invalidRegistration
       }
 
-      "enables users to chat to each other"  in new TestFunctions {
+      "enables users to chat to each other" in new TestFunctions {
         chat
       }
 
@@ -69,12 +69,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
 
       "message receiver subscribes to sender" in new TestFunctions {
-        receiver_connects
+        receiverConnects
       }
     }
 
     "usernames have domains " should {
-      "connects to the xmpp server"  in new TestFunctionsWithDomain {
+      "connects to the xmpp server" in new TestFunctionsWithDomain {
         connected
       }
 
@@ -83,14 +83,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
 
       "should reject duplicate registration" in new TestFunctionsWithDomain {
-        same_registration
+        sameRegistration
       }
 
       "should reject registration with username same as domain" in new TestFunctionsWithDomain {
-        invalid_registration
+        invalidRegistration
       }
 
-      "enables users to chat to each other"  in new TestFunctionsWithDomain {
+      "enables users to chat to each other" in new TestFunctionsWithDomain {
         chat
       }
 
@@ -111,37 +111,36 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
 
       "message receiver subscribes to sender" in new TestFunctionsWithDomain {
-        receiver_connects
+        receiverConnects
       }
     }
   }
 
-
   class TestFunctions extends AnyRef with Fixture {
-      def connected:Unit = {
-        val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
-        connected.value.get shouldBe Success(Connected)
-        adminUser ! Disconnect
+    def connected: Unit = {
+      val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+      connected.value.get shouldBe Success(Connected)
+      adminUser ! Disconnect
+    }
+
+    def registration: Unit = {
+      val username = randomUsername
+      val userPass = Password(username.value)
+
+      val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+      adminUser ! RegisterUser(username, userPass)
+
+      val connected1 = user1 ? Connect(username, userPass)
+      connected1.value.get shouldBe Success(Connected)
+
+      user1 ! DeleteUser
+      val connected2 = user1 ? Connect(username, userPass)
+      connected2.value.get.get match {
+        case ConnectError(t) ⇒ //that's all we want to check
       }
+    }
 
-     def registration:Unit = {
-       val username = randomUsername
-       val userPass = Password(username.value)
-
-       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
-       adminUser ! RegisterUser(username, userPass)
-
-       val connected1 = user1 ? Connect(username, userPass)
-       connected1.value.get shouldBe Success(Connected)
-
-       user1 ! DeleteUser
-       val connected2 = user1 ? Connect(username, userPass)
-       connected2.value.get.get match {
-         case ConnectError(t) ⇒ //that's all we want to check
-       }
-     }
-
-    def same_registration:Unit = {
+    def sameRegistration: Unit = {
       val username = randomUsername
       val userPass = Password(username.value)
 
@@ -151,7 +150,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       registration.value.get shouldBe Failure(DuplicateUser(username))
     }
 
-    def invalid_registration:Unit = {
+    def invalidRegistration: Unit = {
       val username = User(domain);
       val userPass = Password(username.value)
 
@@ -160,7 +159,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       registration.value.get shouldBe Failure(InvalidUserName(username))
     }
 
-    def chat:Unit = {
+    def chat: Unit = {
       withTwoConnectedUsers {
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
@@ -230,7 +229,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-        user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster"){
+        user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster") {
           case UserBecameAvailable(user) =>
             val roster = getRoster(user1)
             roster.getEntries should have size 1
@@ -253,12 +252,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
-    def receiver_connects = {
+    def receiverConnects = {
       withTwoConnectedUsers {
-       user1 ! SendMessage(username2, testMessage)
-       verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        user1 ! SendMessage(username2, testMessage)
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-        user2Listener.fishForMessage(3 seconds, "notification that user1 is in roster"){
+        user2Listener.fishForMessage(3 seconds, "notification that user1 is in roster") {
           case UserBecameAvailable(user) =>
             val roster = getRoster(user2)
             roster.getEntries should have size 1
@@ -276,11 +275,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  class TestFunctionsWithDomain extends TestFunctions with FixtureWithDomain{
+  class TestFunctionsWithDomain extends TestFunctions with FixtureWithDomain {
     assert(username1.value.contains("@"))
     assert(username2.value.contains("@"))
   }
-  
 
   trait Fixture {
     val adminUser = TestActorRef(Props[Client])
