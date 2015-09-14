@@ -8,12 +8,13 @@ import java.util.Collection
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.XMPPException.XMPPErrorException
 import org.jivesoftware.smack.chat._
-import org.jivesoftware.smack.packet.{ ExtensionElement, Message, Presence }
+import org.jivesoftware.smack.packet.{XMPPError, ExtensionElement, Message, Presence}
 import org.jivesoftware.smack.roster.{ Roster, RosterListener }
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
 import scala.collection.JavaConversions._
 import scala.util.{ Failure, Success, Try }
+import akka.actor.Status.{Failure => ActorFailure}
 
 object Client {
   object ConfigKeys {
@@ -152,18 +153,19 @@ class Client extends FSM[State, Context] {
         accountManager.createAccount(username.value, register.password.value)
       } match {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
-        case Failure(t) ⇒ {
+        case Failure(t) ⇒
           log.error(t, s"could not register ${register.user}!")
-          t match {
-            case ex:Messages.InvalidUserName => sender !  akka.actor.Status.Failure(ex)
-            case ex:XMPPErrorException => {
-              if(ex.getMessage == "XMPPError: conflict - cancel")
-                sender ! akka.actor.Status.Failure(Messages.DuplicateUser(register.user))
-              else sender ! akka.actor.Status.Failure(Messages.GeneralSmackError(t))
-            }
-            case _ => sender ! akka.actor.Status.Failure(t)
+          val response: ActorFailure = t match {
+            case ex:Messages.InvalidUserName => ActorFailure(ex)
+            case ex:XMPPErrorException =>
+              if(ex.getXMPPError.getCondition == XMPPError.Condition.conflict && ex.getXMPPError.getType == XMPPError.Type.CANCEL)
+                ActorFailure(Messages.DuplicateUser(register.user))
+              else ActorFailure(Messages.GeneralSmackError(t))
+
+            case _ => ActorFailure(t)
           }
-        }
+          sender ! response
+
       }
       stay
 
