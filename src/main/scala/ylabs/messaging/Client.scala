@@ -59,6 +59,7 @@ object Client {
 
     sealed trait SmackError extends Throwable
     case class DuplicateUser(user: User) extends SmackError
+    case class InvalidUserName(user: User) extends SmackError
     case class GeneralSmackError(reason: Throwable) extends SmackError
   }
 }
@@ -141,18 +142,20 @@ class Client extends FSM[State, Context] {
       val accountManager = AccountManager.getInstance(connection)
       Try {
         val (username, _) = splitUserIntoNameAndDomain(register.user)
+        if(username.value == domain) throw new Messages.InvalidUserName(register.user)
         accountManager.createAccount(username.value, register.password.value)
       } match {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
         case Failure(t) ⇒ {
           log.error(t, s"could not register ${register.user}!")
           t match {
+            case ex:Messages.InvalidUserName => sender !  akka.actor.Status.Failure(ex)
             case ex:XMPPErrorException => {
               if(ex.getMessage == "XMPPError: conflict - cancel")
                 sender ! akka.actor.Status.Failure(Messages.DuplicateUser(register.user))
               else sender ! akka.actor.Status.Failure(Messages.GeneralSmackError(t))
             }
-            case _ => sender ! akka.actor.Status.Failure(Messages.GeneralSmackError(t))
+            case _ => sender ! akka.actor.Status.Failure(t)
           }
         }
       }
