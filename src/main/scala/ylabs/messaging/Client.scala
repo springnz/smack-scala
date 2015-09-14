@@ -22,6 +22,9 @@ object Client {
 
   case class User(value: String) extends AnyVal
   case class Password(value: String) extends AnyVal
+  case class Domain(value: String) extends  AnyVal
+  case class UserWithoutDomain(value: String) extends AnyVal
+  case class UserWithDomain(value: String) extends AnyVal
 
   sealed trait State
   case object Unconnected extends State
@@ -62,6 +65,14 @@ class Client extends FSM[State, Context] {
   lazy val domain = config.getString(ConfigKeys.domain)
   lazy val host = config.getString(ConfigKeys.host)
 
+  def splitUserIntoNameAndDomain(user: User):(UserWithoutDomain, Domain) = {
+    val (u ,_) = user.value.span(c => c != '@')
+    (new UserWithoutDomain(u), Domain(domain))
+  }
+  def getFullyQualifiedUser(u: UserWithoutDomain, d: Domain):UserWithDomain = {
+    UserWithDomain(s"${u.value}@${d.value}")
+  }
+
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
       Try { connect(c.user, c.password) } match {
@@ -97,18 +108,26 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterEventListener(actor), ctx) ⇒
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
-    case Event(msg: Messages.ListenerEvent, ctx) ⇒
-      ctx.eventListeners foreach { _ ! msg }
+    case Event(msg: Messages.ListenerEvent, Context(Some(connection), _, eventListeners)) ⇒
+      msg match {
+        case Messages.MessageReceived(chat, message) =>
+          val (user, domain) = splitUserIntoNameAndDomain(User(chat.getParticipant))
+          subscribeToStatus(connection, user, domain)
+        case msg: Messages.ListenerEvent =>
+      }
+      eventListeners foreach { _ ! msg }
       stay
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
-      val chat = chats.getOrElse(key = recipient, createChat(connection, recipient))
+      val (user, domain) = splitUserIntoNameAndDomain(recipient)
+      val chat = chats.getOrElse(key = recipient, createChat(connection, user, domain))
       chat.sendMessage(message)
       log.info(s"message sent to $recipient")
       stay using ctx.copy(chats = chats + (recipient → chat))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
-      val chat = ctx.chats.getOrElse(key = recipient, createChat(ctx.connection.get, recipient))
+      val (user, domain) = splitUserIntoNameAndDomain(recipient)
+      val chat = ctx.chats.getOrElse(key = recipient, createChat(ctx.connection.get, user, domain))
       val fileInformation = OutOfBandData(fileUrl, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
@@ -122,7 +141,8 @@ class Client extends FSM[State, Context] {
       log.info(s"trying to register ${register.user}")
       val accountManager = AccountManager.getInstance(connection)
       Try {
-        accountManager.createAccount(register.user.value, register.password.value)
+        val (username, _) = splitUserIntoNameAndDomain(register.user)
+        accountManager.createAccount(username.value, register.password.value)
       } match {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
         case Failure(t) ⇒ log.error(t, s"could not register ${register.user}!")
@@ -144,13 +164,17 @@ class Client extends FSM[State, Context] {
       val roster = Roster.getInstanceFor(connection)
       sender ! Messages.GetRosterResponse(roster)
       stay
+
+
+
   }
 
   def connect(user: User, password: Password): XMPPTCPConnection = {
+    val (username, domain) = splitUserIntoNameAndDomain(user)
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
-      .setUsernameAndPassword(user.value, password.value)
-      .setServiceName(domain)
+      .setUsernameAndPassword(username.value, password.value)
+      .setServiceName(domain.value)
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
       .setSendPresence(true)
@@ -182,24 +206,25 @@ class Client extends FSM[State, Context] {
   def setupRosterListener(connection: XMPPTCPConnection): Unit =
     Roster.getInstanceFor(connection).addRosterListener(rosterListener)
 
-  def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
+  def createChat(connection: XMPPTCPConnection, recipient: UserWithoutDomain, domain: Domain): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
-    val chat = chatManager.createChat(s"${recipient.value}@$domain")
-    chat.addMessageListener(chatMessageListener)
+    val chat = chatManager.createChat(getFullyQualifiedUser(recipient, domain).value)
     log.debug(s"chat with $recipient created")
-    subscribeToStatus(connection, recipient)
+    subscribeToStatus(connection, recipient, domain)
     chat
   }
 
-  def subscribeToStatus(connection: XMPPTCPConnection, user: User): Unit = {
-    val username = s"${user.value}@$domain"
-    val roster = Roster.getInstanceFor(connection)
-    if (!roster.getEntries.contains(username)) {
-      val presence = new Presence(Presence.Type.subscribe)
-      presence.setTo(username)
-      log.info(s"requesting roster presence permissions for $user")
-      connection.sendStanza(presence)
-      log.info(s"requested roster presence permissions for $user")
+  def subscribeToStatus(connection: XMPPTCPConnection, user: UserWithoutDomain, domain: Domain): Unit = {
+    if(user.value != domain.value) {
+      val username = getFullyQualifiedUser(user, domain).value
+      val roster = Roster.getInstanceFor(connection)
+      if (!roster.getEntries.contains(username)) {
+        val presence = new Presence(Presence.Type.subscribe)
+        presence.setTo(username)
+        log.info(s"requesting roster presence permissions for $user")
+        connection.sendStanza(presence)
+        log.info(s"requested roster presence permissions for $user")
+      }
     }
   }
 
