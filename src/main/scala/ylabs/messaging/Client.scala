@@ -108,14 +108,14 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterEventListener(actor), ctx) ⇒
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
-    case Event(msg: Messages.ListenerEvent, ctx @ Context(Some(connection), chats, _)) ⇒
+    case Event(msg: Messages.ListenerEvent, Context(Some(connection), _, eventListeners)) ⇒
       msg match {
         case Messages.MessageReceived(chat, message) =>
           val (user, domain) = splitUserIntoNameAndDomain(User(chat.getParticipant))
           subscribeToStatus(connection, user, domain)
         case msg: Messages.ListenerEvent =>
       }
-      ctx.eventListeners foreach { _ ! msg }
+      eventListeners foreach { _ ! msg }
       stay
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
