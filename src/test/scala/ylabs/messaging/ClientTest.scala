@@ -40,7 +40,11 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         registration
       }
 
-      "enables users to chat to each other" in new TestFunctions {
+      "should reject duplicate registration" taggedAs (org.scalatest.Tag("foo")) in new TestFunctions {
+        same_registration
+      }
+
+      "enables users to chat to each other"  in new TestFunctions {
         chat
       }
 
@@ -116,6 +120,17 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
          case ConnectError(t) ⇒ //that's all we want to check
        }
      }
+
+    def same_registration:Unit = {
+      val username = randomUsername
+      val userPass = Password(username.value)
+
+      val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+      adminUser ! RegisterUser(username, userPass)
+      val registration = adminUser ? RegisterUser(username, userPass)
+      registration.value.get shouldBe DuplicateUser(username)
+    }
+
 
     def chat:Unit = {
       withTwoConnectedUsers {
