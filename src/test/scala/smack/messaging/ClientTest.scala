@@ -230,7 +230,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
         user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster") {
-          case UserBecameAvailable(user) =>
+          case UserBecameAvailable(user) ⇒
             val roster = getRoster(user1)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
@@ -241,7 +241,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         user2 ! Disconnect
         user1Listener.fishForMessage(3 seconds, "notification that user2 is not in roster") {
-          case UserBecameUnavailable(user) =>
+          case UserBecameUnavailable(user) ⇒
             val roster = getRoster(user1)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
@@ -258,7 +258,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
         user2Listener.fishForMessage(3 seconds, "notification that user1 is in roster") {
-          case UserBecameAvailable(user) =>
+          case UserBecameAvailable(user) ⇒
             val roster = getRoster(user2)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
