@@ -60,7 +60,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         roster
       }
 
-      "message receiver initiates chat" taggedAs(org.scalatest.Tag("foo"))in new TestFunctions {
+      "message receiver subscribes to sender" in new TestFunctions {
         receiver_connects
       }
     }
@@ -94,7 +94,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         roster
       }
 
-      "message receiver initiates chat" taggedAs(org.scalatest.Tag("foo"))in new TestFunctionsWithDomain {
+      "message receiver subscribes to sender" in new TestFunctionsWithDomain {
         receiver_connects
       }
     }
@@ -197,7 +197,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster"){
           case UserBecameAvailable(user) =>
-            val roster = getRoster
+            val roster = getRoster(user1)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
             entry.getUser should startWith(username2.value)
@@ -208,7 +208,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user2 ! Disconnect
         user1Listener.fishForMessage(3 seconds, "notification that user2 is not in roster") {
           case UserBecameUnavailable(user) =>
-            val roster = getRoster
+            val roster = getRoster(user1)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
             entry.getUser should startWith(username2.value)
@@ -225,7 +225,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         user2Listener.fishForMessage(3 seconds, "notification that user1 is in roster"){
           case UserBecameAvailable(user) =>
-            val roster = getRoster
+            val roster = getRoster(user2)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
             entry.getUser should startWith(username1.value)
@@ -235,8 +235,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
-    private def getRoster: Roster = {
-      val rosterFuture = (user1 ? GetRoster).mapTo[GetRosterResponse]
+    private def getRoster(u: TestActorRef[Nothing]): Roster = {
+      val rosterFuture = (u ? GetRoster).mapTo[GetRosterResponse]
       Await.result(rosterFuture, 3 seconds).roster
     }
   }
