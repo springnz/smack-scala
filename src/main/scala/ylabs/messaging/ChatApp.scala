@@ -19,7 +19,7 @@ object ChatApp extends App {
   computerSays("Welcome, sir! Please help me with the following:")
   computerSays("username: "); val username = io.StdIn.readLine
   computerSays("password: "); val password = io.StdIn.readLine
-  val connectPromise = chattie ? Connect(User(username), Password(password))
+  val connectPromise = chattie ? Connect(User(username, None), Password(password))
   Await.ready(connectPromise, timeout.duration)
   computerSays("You are connected, sir! Say `help` for usage.")
 
@@ -43,14 +43,14 @@ object ChatApp extends App {
 
       case "message" ⇒
         computerSays("Who do you want to send a message to, sir?")
-        val user = User(io.StdIn.readLine)
-        computerSays(s"What do you want to say to ${user.value}, sir?")
+        val user = User(io.StdIn.readLine, None)
+        computerSays(s"What do you want to say to ${user.name}, sir?")
         val message = io.StdIn.readLine
         chattie ! SendMessage(user, message)
 
       case "file" =>
         computerSays("Who do you want to send a file to, sir?")
-        val user = User(io.StdIn.readLine)
+        val user = User(io.StdIn.readLine, None)
         computerSays(s"What is the file url, sir?")
         val fileUrl = io.StdIn.readLine
         chattie ! SendFileMessage(user, fileUrl, description = None)
