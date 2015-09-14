@@ -69,8 +69,7 @@ class Client extends FSM[State, Context] {
     val (u ,_) = user.value.span(c => c != '@')
     (new UserWithoutDomain(u), Domain(domain))
   }
-  def getFullyQualifiedUser(user: User):UserWithDomain = {
-    val (u, d) = splitUserIntoNameAndDomain(user)
+  def getFullyQualifiedUser(u: UserWithoutDomain, d: Domain):UserWithDomain = {
     UserWithDomain(s"${u.value}@${d.value}")
   }
 
@@ -114,13 +113,15 @@ class Client extends FSM[State, Context] {
       stay
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
-      val chat = chats.getOrElse(key = recipient, createChat(connection, recipient))
+      val (user, domain) = splitUserIntoNameAndDomain(recipient)
+      val chat = chats.getOrElse(key = recipient, createChat(connection, user, domain))
       chat.sendMessage(message)
       log.info(s"message sent to $recipient")
       stay using ctx.copy(chats = chats + (recipient → chat))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
-      val chat = ctx.chats.getOrElse(key = recipient, createChat(ctx.connection.get, recipient))
+      val (user, domain) = splitUserIntoNameAndDomain(recipient)
+      val chat = ctx.chats.getOrElse(key = recipient, createChat(ctx.connection.get, user, domain))
       val fileInformation = OutOfBandData(fileUrl, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
@@ -196,17 +197,17 @@ class Client extends FSM[State, Context] {
   def setupRosterListener(connection: XMPPTCPConnection): Unit =
     Roster.getInstanceFor(connection).addRosterListener(rosterListener)
 
-  def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
+  def createChat(connection: XMPPTCPConnection, recipient: UserWithoutDomain, domain: Domain): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
-    val chat = chatManager.createChat(getFullyQualifiedUser(recipient).value)
+    val chat = chatManager.createChat(getFullyQualifiedUser(recipient, domain).value)
     chat.addMessageListener(chatMessageListener)
     log.debug(s"chat with $recipient created")
-    subscribeToStatus(connection, recipient)
+    subscribeToStatus(connection, recipient, domain)
     chat
   }
 
-  def subscribeToStatus(connection: XMPPTCPConnection, user: User): Unit = {
-    val username = getFullyQualifiedUser(user).value
+  def subscribeToStatus(connection: XMPPTCPConnection, user: UserWithoutDomain, domain: Domain): Unit = {
+    val username = getFullyQualifiedUser(user, domain).value
     val roster = Roster.getInstanceFor(connection)
     if (!roster.getEntries.contains(username)) {
       val presence = new Presence(Presence.Type.subscribe)
