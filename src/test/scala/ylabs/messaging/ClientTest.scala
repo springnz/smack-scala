@@ -32,35 +32,35 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   "A client" when {
     "usernames don't have domains " should {
-      "connects to the xmpp server" in new TestFunctionsWithoutDomain {
+      "connects to the xmpp server" in new TestFunctions {
         connected
       }
 
-      "allows user registration and deletion" in new TestFunctionsWithoutDomain {
+      "allows user registration and deletion" in new TestFunctions {
         registration
       }
 
-      "enables users to chat to each other" in new TestFunctionsWithoutDomain {
+      "enables users to chat to each other" in new TestFunctions {
         chat
       }
 
-      "enables async chats (message recipient offline)" in new TestFunctionsWithoutDomain {
+      "enables async chats (message recipient offline)" in new TestFunctions {
         asyncChat
       }
 
-      "enables XEP-0066 file transfers" in new TestFunctionsWithoutDomain {
+      "enables XEP-0066 file transfers" in new TestFunctions {
         XEP_0066_FileTransfers
       }
 
-      "informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithoutDomain {
+      "informs event listeners about chat partners becoming available / unavailable" in new TestFunctions {
         availability
       }
 
-      "provides information about who is online and offline (roster)" in new TestFunctionsWithoutDomain {
+      "provides information about who is online and offline (roster)" in new TestFunctions {
         roster
       }
 
-      "message receiver subscribes to sender" in new TestFunctionsWithoutDomain {
+      "message receiver subscribes to sender" in new TestFunctions {
         receiver_connects
       }
     }
@@ -101,18 +101,18 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
 
-  abstract class TestFunctions extends AnyRef with SharedFixture {
+  class TestFunctions extends AnyRef with Fixture {
       def connected:Unit = {
-        val connected = adminUser ? Connect(User(adminUsername, None), Password(adminPassword))
+        val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
         connected.value.get shouldBe Success(Connected)
         adminUser ! Disconnect
       }
 
      def registration:Unit = {
        val username = randomUsername
-       val userPass = Password(username.name)
+       val userPass = Password(username.value)
 
-       val connected = adminUser ? Connect(User(adminUsername, None), Password(adminPassword))
+       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
        adminUser ! RegisterUser(username, userPass)
 
        val connected1 = user1 ? Connect(username, userPass)
@@ -156,8 +156,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
           case FileMessageReceived(chat, message, outOfBandData) ⇒
-            chat.getParticipant should startWith(username1.name)
-            message.getTo should startWith(username2.name)
+            chat.getParticipant should startWith(username1.value)
+            message.getTo should startWith(username2.value)
             outOfBandData.url shouldBe fileUrl
             outOfBandData.desc shouldBe fileDescription
         }
@@ -170,21 +170,21 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
         user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
           case UserBecameAvailable(user) ⇒
-            user.name should startWith(username2.name)
+            user.value should startWith(username2.value)
             true
         }
 
         user2 ! Disconnect
         user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
           case UserBecameUnavailable(user) ⇒
-            user.name should startWith(username2.name)
+            user.value should startWith(username2.value)
             true
         }
 
         user2 ! Connect(username2, user2Pass)
         user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
           case UserBecameAvailable(user) ⇒
-            user.name should startWith(username2.name)
+            user.value should startWith(username2.value)
             true
         }
       }
@@ -200,7 +200,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             val roster = getRoster(user1)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
-            entry.getUser should startWith(username2.name)
+            entry.getUser should startWith(username2.value)
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
             true
         }
@@ -211,7 +211,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             val roster = getRoster(user1)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
-            entry.getUser should startWith(username2.name)
+            entry.getUser should startWith(username2.value)
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
             true
         }
@@ -228,7 +228,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             val roster = getRoster(user2)
             roster.getEntries should have size 1
             val entry = roster.getEntries.head
-            entry.getUser should startWith(username1.name)
+            entry.getUser should startWith(username1.value)
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
             true
         }
@@ -241,28 +241,20 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  class TestFunctionsWithoutDomain extends TestFunctions with Fixture {
-
-  }
-
   class TestFunctionsWithDomain extends TestFunctions with FixtureWithDomain{
-    assert(username1.name.contains("@"))
-    assert(username2.name.contains("@"))
+    assert(username1.value.contains("@"))
+    assert(username2.value.contains("@"))
   }
+  
 
-  trait SharedFixture {
-
-
-    val username1:User
-    val username2:User
-    val user1Pass:Password
-    val user2Pass:Password
-
+  trait Fixture {
     val adminUser = TestActorRef(Props[Client])
     val user1 = TestActorRef(Props[Client])
     val user2 = TestActorRef(Props[Client])
-
-
+    val username1 = randomUsername
+    val username2 = randomUsername
+    val user1Pass = Password(username1.value)
+    val user2Pass = Password(username2.value)
     val user1Listener = newEventListener
     val user2Listener = newEventListener
 
@@ -277,9 +269,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def withTwoUsers(block: ⇒ Unit): Unit = {
-      adminUser ! Connect(User(adminUsername, None), Password(adminPassword))
-      adminUser ! RegisterUser(username1, Password(username1.name))
-      adminUser ! RegisterUser(username2, Password(username2.name))
+      adminUser ! Connect(User(adminUsername), Password(adminPassword))
+      adminUser ! RegisterUser(username1, Password(username1.value))
+      adminUser ! RegisterUser(username2, Password(username2.value))
 
       user1 ! RegisterEventListener(user1Listener.ref)
       user2 ! RegisterEventListener(user2Listener.ref)
@@ -301,8 +293,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     def verifyMessageArrived(testProbe: TestProbe, sender: User, recipient: User, messageBody: String): Unit = {
       testProbe.fishForMessage(3 seconds, "expected message to be delivered") {
         case MessageReceived(chat, message) ⇒
-          chat.getParticipant should startWith(sender.name)
-          message.getTo should startWith(recipient.name)
+          chat.getParticipant should startWith(sender.value)
+          message.getTo should startWith(recipient.value)
           message.getBody shouldBe messageBody
           true
         case _ ⇒ false
@@ -310,23 +302,15 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  trait Fixture extends SharedFixture {
-    override val username1 = randomUsername
-    override val username2 = randomUsername
-    override val user1Pass = Password(username1.name)
-    override val user2Pass = Password(username2.name)
-
-  }
-
-  trait FixtureWithDomain extends SharedFixture {
+  trait FixtureWithDomain extends Fixture {
     override val username1 = nameWithDomain(randomUsername)
     override val username2 = nameWithDomain(randomUsername)
-    override val user1Pass = Password(username1.name)
-    override val user2Pass = Password(username2.name)
+    override val user1Pass = Password(username1.value)
+    override val user2Pass = Password(username2.value)
   }
 
-  def randomUsername = User(s"testuser-${UUID.randomUUID.toString.substring(9)}", None)
-  def nameWithDomain(u: User) = User(u.name + s"@$domain", None)
+  def randomUsername = User(s"testuser-${UUID.randomUUID.toString.substring(9)}")
+  def nameWithDomain(u: User) = u.copy(value = u.value + s"@$domain")
 
   override def beforeEach() {
     system = ActorSystem()

@@ -20,8 +20,11 @@ object Client {
     val host = "messaging.host"
   }
 
-  case class User(name: String, domain: Option[String])
+  case class User(value: String) extends AnyVal
   case class Password(value: String) extends AnyVal
+  case class Domain(value: String) extends  AnyVal
+  case class UserWithoutDomain(value: String) extends AnyVal
+  case class UserWithDomain(value: String) extends AnyVal
 
   sealed trait State
   case object Unconnected extends State
@@ -62,13 +65,12 @@ class Client extends FSM[State, Context] {
   lazy val domain = config.getString(ConfigKeys.domain)
   lazy val host = config.getString(ConfigKeys.host)
 
-  def makeUserWithDomain(user: User):User = {
-    val (u ,_) = user.name.span(c => c != '@')
-    new User(u, Some(domain))
+  def splitUserIntoNameAndDomain(user: User):(UserWithoutDomain, Domain) = {
+    val (u ,_) = user.value.span(c => c != '@')
+    (new UserWithoutDomain(u), Domain(domain))
   }
-  def getFullyQualifiedUser(u: User):String = {
-    val realUser = makeUserWithDomain(u)
-    (s"${realUser.name}@${domain}")
+  def getFullyQualifiedUser(u: UserWithoutDomain, d: Domain):UserWithDomain = {
+    UserWithDomain(s"${u.value}@${d.value}")
   }
 
   when(Unconnected) {
@@ -109,25 +111,27 @@ class Client extends FSM[State, Context] {
     case Event(msg: Messages.ListenerEvent, Context(Some(connection), _, eventListeners)) ⇒
       msg match {
         case Messages.MessageReceived(chat, message) =>
-          subscribeToStatus(connection, User(chat.getParticipant, None))
+          val (user, domain) = splitUserIntoNameAndDomain(User(chat.getParticipant))
+          subscribeToStatus(connection, user, domain)
         case msg: Messages.ListenerEvent =>
       }
       eventListeners foreach { _ ! msg }
       stay
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
-      val chat = chats.getOrElse(key = recipient, createChat(connection, recipient))
+      val (user, domain) = splitUserIntoNameAndDomain(recipient)
+      val chat = chats.getOrElse(key = recipient, createChat(connection, user, domain))
       chat.sendMessage(message)
       log.info(s"message sent to $recipient")
       stay using ctx.copy(chats = chats + (recipient → chat))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
-      val chat = ctx.chats.getOrElse(key = recipient, createChat(ctx.connection.get, recipient))
+      val (user, domain) = splitUserIntoNameAndDomain(recipient)
+      val chat = ctx.chats.getOrElse(key = recipient, createChat(ctx.connection.get, user, domain))
       val fileInformation = OutOfBandData(fileUrl, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
-      val realUser = makeUserWithDomain(recipient)
-      val message = new Message(realUser.name, infoText)
+      val message = new Message(recipient.value, infoText)
       message.addExtension(fileInformation)
       chat.sendMessage(message)
       log.info(s"file message sent to $recipient")
@@ -136,12 +140,12 @@ class Client extends FSM[State, Context] {
     case Event(register: Messages.RegisterUser, Context(Some(connection), chats, _)) ⇒
       log.info(s"trying to register ${register.user}")
       val accountManager = AccountManager.getInstance(connection)
-      val realUser = makeUserWithDomain(register.user)
       Try {
-        accountManager.createAccount(realUser.name, register.password.value)
+        val (username, _) = splitUserIntoNameAndDomain(register.user)
+        accountManager.createAccount(username.value, register.password.value)
       } match {
-        case Success(s) ⇒ log.info(s"${realUser.name} successfully created")
-        case Failure(t) ⇒ log.error(t, s"could not register ${realUser.name}!")
+        case Success(s) ⇒ log.info(s"${register.user} successfully created")
+        case Failure(t) ⇒ log.error(t, s"could not register ${register.user}!")
       }
       stay
 
@@ -166,11 +170,11 @@ class Client extends FSM[State, Context] {
   }
 
   def connect(user: User, password: Password): XMPPTCPConnection = {
-    val realUser = makeUserWithDomain(user)
+    val (username, domain) = splitUserIntoNameAndDomain(user)
     val connection = new XMPPTCPConnection(
       XMPPTCPConnectionConfiguration.builder
-      .setUsernameAndPassword(realUser.name, password.value)
-      .setServiceName(domain)
+      .setUsernameAndPassword(username.value, password.value)
+      .setServiceName(domain.value)
       .setHost(host)
       .setSecurityMode(SecurityMode.disabled)
       .setSendPresence(true)
@@ -202,17 +206,17 @@ class Client extends FSM[State, Context] {
   def setupRosterListener(connection: XMPPTCPConnection): Unit =
     Roster.getInstanceFor(connection).addRosterListener(rosterListener)
 
-  def createChat(connection: XMPPTCPConnection, recipient: User): Chat = {
+  def createChat(connection: XMPPTCPConnection, recipient: UserWithoutDomain, domain: Domain): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
-    val chat = chatManager.createChat(getFullyQualifiedUser(recipient))
+    val chat = chatManager.createChat(getFullyQualifiedUser(recipient, domain).value)
     log.debug(s"chat with $recipient created")
-    subscribeToStatus(connection, recipient)
+    subscribeToStatus(connection, recipient, domain)
     chat
   }
 
-  def subscribeToStatus(connection: XMPPTCPConnection, user: User): Unit = {
-    if(user.name != domain) {
-      val username = getFullyQualifiedUser(user)
+  def subscribeToStatus(connection: XMPPTCPConnection, user: UserWithoutDomain, domain: Domain): Unit = {
+    if(user.value != domain.value) {
+      val username = getFullyQualifiedUser(user, domain).value
       val roster = Roster.getInstanceFor(connection)
       if (!roster.getEntries.contains(username)) {
         val presence = new Presence(Presence.Type.subscribe)
@@ -255,7 +259,7 @@ class Client extends FSM[State, Context] {
       log.debug("roster entries updated: " + entries.toList)
     }
     def presenceChanged(presence: Presence): Unit = {
-      val user = User(presence.getFrom, None)
+      val user = User(presence.getFrom)
       presence.getType match {
         case Presence.Type.available ⇒
           log.debug(s"$user became available")
