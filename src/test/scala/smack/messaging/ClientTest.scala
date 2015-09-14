@@ -71,6 +71,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       "message receiver subscribes to sender" in new TestFunctions {
         receiverConnects
       }
+
+      "detects message delivered acknowledgement" in new TestFunctions {
+        deliveryAcknowledged
+      }
     }
 
     "usernames have domains " should {
@@ -112,6 +116,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "message receiver subscribes to sender" in new TestFunctionsWithDomain {
         receiverConnects
+      }
+
+      "detects message delivered acknowledgement" in new TestFunctionsWithDomain {
+        deliveryAcknowledged
       }
     }
   }
@@ -219,6 +227,18 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
+            true
+        }
+      }
+    }
+
+    def deliveryAcknowledged = {
+      withTwoConnectedUsers {
+        val user1MessageId = user1 ? SendMessage(username2, testMessage)
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        user1Listener.fishForMessage(3 seconds, "notification that message has been delivered") {
+          case MessageDelivered(msgId) ⇒
+            msgId should equal(user1MessageId)
             true
         }
       }
