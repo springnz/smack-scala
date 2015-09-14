@@ -86,10 +86,11 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         same_registration
       }
 
-      "should reject registration with username same as domain" in new TestFunctions {
+      "should reject registration with username same as domain" in new TestFunctionsWithDomain {
         invalid_registration
       }
 
+      "enables users to chat to each other"  in new TestFunctionsWithDomain {
         chat
       }
 
