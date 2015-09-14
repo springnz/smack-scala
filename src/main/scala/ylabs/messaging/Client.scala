@@ -55,6 +55,10 @@ object Client {
     case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
+
+    sealed trait SmackError
+    case class DuplicateUser(user: User) extends SmackError
+    case class GeneralSmackError(reason: Throwable) extends SmackError
   }
 }
 
@@ -139,7 +143,10 @@ class Client extends FSM[State, Context] {
         accountManager.createAccount(username.value, register.password.value)
       } match {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
-        case Failure(t) ⇒ log.error(t, s"could not register ${register.user}!")
+        case Failure(t) ⇒ {
+          log.error(t, s"could not register ${register.user}!")
+          sender ! Messages.GeneralSmackError(t)
+        }
       }
       stay
 
