@@ -6,6 +6,7 @@ import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import java.util.Collection
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
+import org.jivesoftware.smack.XMPPException.XMPPErrorException
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet.{ ExtensionElement, Message, Presence }
 import org.jivesoftware.smack.roster.{ Roster, RosterListener }
@@ -56,7 +57,7 @@ object Client {
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
 
-    sealed trait SmackError
+    sealed trait SmackError extends Throwable
     case class DuplicateUser(user: User) extends SmackError
     case class GeneralSmackError(reason: Throwable) extends SmackError
   }
@@ -145,7 +146,14 @@ class Client extends FSM[State, Context] {
         case Success(s) ⇒ log.info(s"${register.user} successfully created")
         case Failure(t) ⇒ {
           log.error(t, s"could not register ${register.user}!")
-          sender ! Messages.GeneralSmackError(t)
+          t match {
+            case ex:XMPPErrorException => {
+              if(ex.getMessage == "XMPPError: conflict - cancel")
+                sender ! akka.actor.Status.Failure(Messages.DuplicateUser(register.user))
+              else sender ! akka.actor.Status.Failure(Messages.GeneralSmackError(t))
+            }
+            case _ => sender ! akka.actor.Status.Failure(Messages.GeneralSmackError(t))
+          }
         }
       }
       stay

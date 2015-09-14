@@ -16,7 +16,7 @@ import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.util.{ Success, Try }
+import scala.util.{Failure, Success, Try}
 
 // this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
 // see http://docs.ejabberd.im/admin/guide/configuration/#modregister for more details
@@ -128,7 +128,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
       adminUser ! RegisterUser(username, userPass)
       val registration = adminUser ? RegisterUser(username, userPass)
-      registration.value.get shouldBe DuplicateUser(username)
+      registration.value.get shouldBe Failure(DuplicateUser(username))
     }
 
 
