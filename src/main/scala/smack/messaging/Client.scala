@@ -2,7 +2,6 @@ package smack.scala
 
 import Client._
 import OutOfBandData._
-import _root_.smack.scala.Client.Messages.GetUnackMessagesResponse
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import java.util.{ UUID, Collection }
@@ -209,7 +208,7 @@ class Client extends FSM[State, Context] {
       val fullUser = getFullyQualifiedUser(user)
       val chatlist = chats.get(fullUser)
       val unack = if (chatlist.isDefined) chatlist.get.unackMessages else Set[MessageId]()
-      sender ! GetUnackMessagesResponse(user, unack)
+      sender ! Messages.GetUnackMessagesResponse(user, unack)
       stay
 
     case Event(Messages.DeleteUser, ctx @ Context(Some(connection), _, _)) ⇒
