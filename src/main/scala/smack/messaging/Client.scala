@@ -326,9 +326,9 @@ class Client extends FSM[State, Context] {
   }
 
   val deliveryReceiptListener = new ReceiptReceivedListener {
-    override def onReceiptReceived(from: String, s1to: String, receiptId: String, stanza: Stanza): Unit = {
-      log.debug(s"receipt received")
-      val user = User(from.replace("/Smack", ""))
+    override def onReceiptReceived(from: String, to: String, receiptId: String, stanza: Stanza): Unit = {
+      log.debug(s"receipt received $from sent to $to with id $receiptId")
+      val user = User(from.substring(0, from.lastIndexOf('/')))
       self ! Messages.MessageDelivered(user, MessageId(receiptId))
     }
   }

@@ -79,6 +79,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       "async message delivered acknowledgement" in new TestFunctions {
         asyncDeliveryAck
       }
+
+      "message unack tracking" in new TestFunctions {
+        deliveryEnsureIdTracking
+      }
     }
 
     "usernames have domains " should {
@@ -128,6 +132,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "async message delivered acknowledgement" in new TestFunctionsWithDomain {
         asyncDeliveryAck
+      }
+
+      "message unack tracking" in new TestFunctionsWithDomain {
+        deliveryEnsureIdTracking
       }
     }
   }
@@ -268,6 +276,35 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
+    def deliveryEnsureIdTracking = {
+      withTwoUsers {
+        user1 ! Connect(username1, user1Pass)
+        val user2Listener = newEventListener
+        user2 ! RegisterEventListener(user2Listener.ref)
+
+        val user1MessageId = user1 ? SendMessage(username2, testMessage)
+        val unacked = user1 ? GetUnackMessages(username2)
+        unacked.value.get.get match {
+          case GetUnackMessagesResponse(user, ids) =>
+            user.value should startWith(username2.value)
+            ids.sameElements(Set[MessageId](user1MessageId.value.get.get.asInstanceOf[MessageId])) shouldBe true
+        }
+
+        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
+        Thread.sleep(1000)
+        user2 ! Connect(username2, user2Pass)
+
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        verifyMessageDelivery(user1Listener, username1, username2, user1MessageId)
+        val emptyUnacked = user1 ? GetUnackMessages(username2)
+        emptyUnacked.value.get.get match {
+          case GetUnackMessagesResponse(user, ids) =>
+            user.value should startWith(username2.value)
+            ids.isEmpty shouldBe true
+        }
+      }
+    }
+
     def roster = {
       withTwoConnectedUsers {
         user1 ! SendMessage(username2, testMessage)
@@ -384,10 +421,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       testProbe.fishForMessage(3 seconds, "notification that message has been delivered") {
         case MessageDelivered(to, msgId) ⇒
           messageIdFuture.value.get.get match {
-            case MessageId(messageId) ⇒ {
+            case MessageId(messageId) ⇒
               to.value should startWith(recipient.value)
               msgId.value should equal(messageId)
-            }
           }
           true
         case _ ⇒ false
