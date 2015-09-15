@@ -285,7 +285,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val user1MessageId = user1 ? SendMessage(username2, testMessage)
         val unacked = user1 ? GetUnackMessages(username2)
         unacked.value.get.get match {
-          case GetUnackMessagesResponse(user, ids) =>
+          case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
             ids.sameElements(Set[MessageId](user1MessageId.value.get.get.asInstanceOf[MessageId])) shouldBe true
         }
@@ -298,7 +298,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         verifyMessageDelivery(user1Listener, username1, username2, user1MessageId)
         val emptyUnacked = user1 ? GetUnackMessages(username2)
         emptyUnacked.value.get.get match {
-          case GetUnackMessagesResponse(user, ids) =>
+          case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
             ids.isEmpty shouldBe true
         }

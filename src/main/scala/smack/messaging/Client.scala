@@ -2,6 +2,7 @@ package smack.scala
 
 import Client._
 import OutOfBandData._
+import _root_.smack.scala.Client.Messages.GetUnackMessagesResponse
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import java.util.{ UUID, Collection }
@@ -41,7 +42,7 @@ object Client {
 
   case class Context(
     connection: Option[XMPPTCPConnection],
-    chats: Map[User, ChatState],
+    chats: Map[UserWithDomain, ChatState],
     eventListeners: Set[ActorRef])
 
   object Messages {
@@ -59,6 +60,9 @@ object Client {
 
     case class SendMessage(recipient: User, message: String)
     case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
+
+    case class GetUnackMessages(user: User)
+    case class GetUnackMessagesResponse(user: User, ids: Set[MessageId])
 
     sealed trait ListenerEvent
     case class MessageReceived(chat: Chat, message: Message) extends ListenerEvent
@@ -86,6 +90,11 @@ class Client extends FSM[State, Context] {
   def splitUserIntoNameAndDomain(user: User): (UserWithoutDomain, Domain) = {
     val (u, _) = user.value.span(c ⇒ c != '@')
     (new UserWithoutDomain(u), Domain(domain))
+  }
+
+  def getFullyQualifiedUser(u: User): UserWithDomain = {
+    val (user, domain) = splitUserIntoNameAndDomain(u)
+    return getFullyQualifiedUser(user, domain)
   }
 
   def getFullyQualifiedUser(u: UserWithoutDomain, d: Domain): UserWithDomain = {
@@ -138,9 +147,9 @@ class Client extends FSM[State, Context] {
           val (user, domain) = splitUserIntoNameAndDomain(User(chat.getParticipant))
           subscribeToStatus(connection, user, domain)
         case Messages.MessageDelivered(recipient, messageId) ⇒
-          val chat = ctx.chats.get(recipient)
-          if (chat.isDefined)
-            copier = ctx.copy(chats = ctx.chats + (recipient -> chat.get.copy(unackMessages = chat.get.unackMessages - messageId)))
+          val fullUser = getFullyQualifiedUser(recipient)
+          val chat = ctx.chats(fullUser)
+          copier = ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(unackMessages = chat.unackMessages - messageId)))
         case msg: Messages.ListenerEvent ⇒
       }
       eventListeners foreach {
@@ -150,16 +159,18 @@ class Client extends FSM[State, Context] {
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
       val (user, domain) = splitUserIntoNameAndDomain(recipient)
-      val chat = chats.getOrElse(key = recipient, ChatState(createChat(connection, user, domain), Set.empty))
+      val fullUser = getFullyQualifiedUser(user, domain)
+      val chat = chats.getOrElse(key = fullUser, ChatState(createChat(connection, user, domain), Set.empty))
       val messageToSend = new Message(recipient.value, message)
       chat.channel.sendMessage(messageToSend)
       log.info(s"message sent to $recipient")
       sender ! MessageId(messageToSend.getStanzaId)
-      stay using ctx.copy(chats = ctx.chats + (recipient → chat.copy(unackMessages = chat.unackMessages + MessageId(messageToSend.getStanzaId))))
+      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(unackMessages = chat.unackMessages + MessageId(messageToSend.getStanzaId))))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
       val (user, domain) = splitUserIntoNameAndDomain(recipient)
-      val chat = ctx.chats.getOrElse(key = recipient, ChatState(createChat(ctx.connection.get, user, domain), Set.empty))
+      val fullUser = getFullyQualifiedUser(user, domain)
+      val chat = ctx.chats.getOrElse(key = fullUser, ChatState(createChat(ctx.connection.get, user, domain), Set.empty))
       val fileInformation = OutOfBandData(fileUrl, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
@@ -168,7 +179,7 @@ class Client extends FSM[State, Context] {
       chat.channel.sendMessage(message)
       log.info(s"file message sent to $recipient")
       sender ! MessageId(message.getStanzaId)
-      stay using ctx.copy(chats = ctx.chats + (recipient → chat.copy(unackMessages = chat.unackMessages + MessageId(message.getStanzaId))))
+      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(unackMessages = chat.unackMessages + MessageId(message.getStanzaId))))
 
     case Event(register: Messages.RegisterUser, Context(Some(connection), chats, _)) ⇒
       log.info(s"trying to register ${register.user}")
@@ -192,6 +203,13 @@ class Client extends FSM[State, Context] {
           }
           sender ! response
       }
+      stay
+
+    case Event(Messages.GetUnackMessages(user), Context(_, chats, _)) ⇒
+      val fullUser = getFullyQualifiedUser(user)
+      val chatlist = chats.get(fullUser)
+      val unack = if (chatlist.isDefined) chatlist.get.unackMessages else Set[MessageId]()
+      sender ! GetUnackMessagesResponse(user, unack)
       stay
 
     case Event(Messages.DeleteUser, ctx @ Context(Some(connection), _, _)) ⇒
