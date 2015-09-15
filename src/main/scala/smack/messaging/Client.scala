@@ -75,7 +75,6 @@ object Client {
     case class InvalidUserName(user: User) extends SmackError
     case class GeneralSmackError(reason: Throwable) extends SmackError
   }
-
 }
 
 class Client extends FSM[State, Context] {
@@ -101,9 +100,7 @@ class Client extends FSM[State, Context] {
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
-      Try {
-        connect(c.user, c.password)
-      } match {
+      Try { connect(c.user, c.password) } match {
         case Success(connection) ⇒
           log.info(s"${c.user} successfully connected")
           goto(Connected) using ctx.copy(connection = Some(connection))
@@ -117,9 +114,7 @@ class Client extends FSM[State, Context] {
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
     case Event(msg: Messages.ListenerEvent, ctx) ⇒
-      ctx.eventListeners foreach {
-        _ ! msg
-      }
+      ctx.eventListeners foreach { _ ! msg }
       stay
   }
 
@@ -150,9 +145,7 @@ class Client extends FSM[State, Context] {
           copier = ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(unackMessages = chat.unackMessages - messageId)))
         case msg: Messages.ListenerEvent ⇒
       }
-      eventListeners foreach {
-        _ ! msg
-      }
+      eventListeners foreach { _ ! msg }
       stay using copier
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
