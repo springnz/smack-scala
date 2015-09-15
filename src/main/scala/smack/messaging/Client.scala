@@ -137,19 +137,19 @@ class Client extends FSM[State, Context] {
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
     case Event(msg: Messages.ListenerEvent, ctx @ Context(Some(connection), chats, eventListeners)) ⇒
-      var copier = ctx
-      msg match {
+      val newCtx = msg match {
         case Messages.MessageReceived(chat, message) ⇒
           val (user, domain) = User(chat.getParticipant).splitUserIntoNameAndDomain(defaultDomain)
           subscribeToStatus(connection, user, domain)
+          ctx
         case Messages.MessageDelivered(recipient, messageId) ⇒
           val fullUser = recipient.getFullyQualifiedUser(defaultDomain)
           val chat = ctx.chats(fullUser)
-          copier = ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(unackMessages = chat.unackMessages - messageId)))
-        case msg: Messages.ListenerEvent ⇒
+          ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(unackMessages = chat.unackMessages - messageId)))
+        case msg: Messages.ListenerEvent ⇒ ctx
       }
       eventListeners foreach { _ ! msg }
-      stay using copier
+      stay using newCtx
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
