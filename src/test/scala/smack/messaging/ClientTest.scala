@@ -289,7 +289,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         Await.result(unackedMessageFuture, 3 seconds) match {
           case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
-            ids.sameElements(Set[MessageId](user1MessageId)) shouldBe true
+            ids.size shouldBe 1
+            ids(0).id shouldBe user1MessageId
         }
 
         // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.

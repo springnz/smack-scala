@@ -52,9 +52,18 @@ object Client {
   case object Unconnected extends State
   case object Connected extends State
 
+  sealed trait MessageStatus
+  case object Acknowledged extends MessageStatus
+  case object Unacknowledged extends MessageStatus
+
+  case class MessageState(
+    message: String,
+    id: MessageId,
+    status: MessageStatus)
+
   case class ChatState(
     channel: Chat,
-    unackMessages: Set[MessageId])
+    messages: Seq[MessageState])
 
   case class Context(
     connection: Option[XMPPTCPConnection],
@@ -78,7 +87,7 @@ object Client {
     case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
 
     case class GetUnackMessages(user: User)
-    case class GetUnackMessagesResponse(user: User, ids: Set[MessageId])
+    case class GetUnackMessagesResponse(user: User, ids: Seq[MessageState])
 
     sealed trait ListenerEvent
     case class MessageReceived(chat: Chat, message: Message) extends ListenerEvent
@@ -145,7 +154,8 @@ class Client extends FSM[State, Context] {
         case Messages.MessageDelivered(recipient, messageId) ⇒
           val fullUser = recipient.getFullyQualifiedUser(defaultDomain)
           val chat = ctx.chats(fullUser)
-          ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(unackMessages = chat.unackMessages - messageId)))
+          val index = chat.messages.indexWhere(m ⇒ m.id == messageId)
+          ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(messages = chat.messages.updated(index, chat.messages(index).copy(status = Acknowledged)))))
         case msg: Messages.ListenerEvent ⇒ ctx
       }
       eventListeners foreach { _ ! msg }
@@ -154,17 +164,18 @@ class Client extends FSM[State, Context] {
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
       val fullUser = user getFullyQualifiedUser domain
-      val chat = chats.getOrElse(key = fullUser, ChatState(createChat(connection, user, domain), Set.empty))
+      val chat = chats.getOrElse(key = fullUser, ChatState(createChat(connection, user, domain), Seq.empty))
       val messageToSend = new Message(recipient.value, message)
       chat.channel.sendMessage(messageToSend)
       log.info(s"message sent to $recipient")
       sender ! MessageId(messageToSend.getStanzaId)
-      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(unackMessages = chat.unackMessages + MessageId(messageToSend.getStanzaId))))
+      val msgState = MessageState(message, MessageId(messageToSend.getStanzaId), Unacknowledged)
+      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
       val fullUser = user getFullyQualifiedUser domain
-      val chat = ctx.chats.getOrElse(key = fullUser, ChatState(createChat(ctx.connection.get, user, domain), Set.empty))
+      val chat = ctx.chats.getOrElse(key = fullUser, ChatState(createChat(ctx.connection.get, user, domain), Seq.empty))
       val fileInformation = OutOfBandData(fileUrl, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
@@ -173,7 +184,8 @@ class Client extends FSM[State, Context] {
       chat.channel.sendMessage(message)
       log.info(s"file message sent to $recipient")
       sender ! MessageId(message.getStanzaId)
-      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(unackMessages = chat.unackMessages + MessageId(message.getStanzaId))))
+      val msgState = MessageState(message.getBody, MessageId(message.getStanzaId), Unacknowledged)
+      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
 
     case Event(register: Messages.RegisterUser, Context(Some(connection), chats, _)) ⇒
       log.info(s"trying to register ${register.user}")
@@ -202,7 +214,7 @@ class Client extends FSM[State, Context] {
     case Event(Messages.GetUnackMessages(user), Context(_, chats, _)) ⇒
       val fullUser = user.getFullyQualifiedUser(defaultDomain)
       val chatlist = chats.get(fullUser)
-      val unack = if (chatlist.isDefined) chatlist.get.unackMessages else Set[MessageId]()
+      val unack = if (chatlist.isDefined) chatlist.get.messages.filter(m ⇒ m.status == Unacknowledged) else Seq[MessageState]()
       sender ! Messages.GetUnackMessagesResponse(user, unack)
       stay
 
