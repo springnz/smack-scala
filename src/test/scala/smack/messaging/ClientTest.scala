@@ -1,6 +1,6 @@
 package smack.scala
 
-import Client.{ Password, User }
+import _root_.smack.scala.Client.{ MessageId, Password, User }
 import Client.Messages._
 import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
@@ -14,7 +14,7 @@ import org.scalatest
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
-import scala.concurrent.Await
+import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
 
@@ -72,8 +72,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         receiverConnects
       }
 
-      "detects message delivered acknowledgement" in new TestFunctions {
+      "message delivered acknowledgement" in new TestFunctions {
         deliveryAcknowledged
+      }
+
+      "async message delivered acknowledgement" in new TestFunctions {
+        asyncDeliveryAck
       }
     }
 
@@ -118,8 +122,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         receiverConnects
       }
 
-      "detects message delivered acknowledgement" in new TestFunctionsWithDomain {
+      "message delivered acknowledgement" in new TestFunctionsWithDomain {
         deliveryAcknowledged
+      }
+
+      "async message delivered acknowledgement" in new TestFunctionsWithDomain {
+        asyncDeliveryAck
       }
     }
   }
@@ -214,6 +222,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
             true
+          case _ ⇒ false
         }
 
         user2 ! Disconnect
@@ -221,6 +230,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case UserBecameUnavailable(user) ⇒
             user.value should startWith(username2.value)
             true
+          case _ ⇒ false
         }
 
         user2 ! Connect(username2, user2Pass)
@@ -228,6 +238,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
             true
+          case _ ⇒ false
         }
       }
     }
@@ -236,11 +247,24 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       withTwoConnectedUsers {
         val user1MessageId = user1 ? SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
-        user1Listener.fishForMessage(3 seconds, "notification that message has been delivered") {
-          case MessageDelivered(msgId) ⇒
-            msgId should equal(user1MessageId)
-            true
-        }
+        verifyMessageDelivery(user1Listener, username1, username2, user1MessageId)
+      }
+    }
+
+    def asyncDeliveryAck: Unit = {
+      withTwoUsers {
+        user1 ! Connect(username1, user1Pass)
+        val user2Listener = newEventListener
+        user2 ! RegisterEventListener(user2Listener.ref)
+
+        val user1MessageId = user1 ? SendMessage(username2, testMessage)
+
+        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
+        Thread.sleep(1000)
+        user2 ! Connect(username2, user2Pass)
+
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        verifyMessageDelivery(user1Listener, username1, username2, user1MessageId)
       }
     }
 
@@ -257,6 +281,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             entry.getUser should startWith(username2.value)
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
             true
+          case _ ⇒ false
         }
 
         user2 ! Disconnect
@@ -268,6 +293,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             entry.getUser should startWith(username2.value)
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
             true
+          case _ ⇒ false
         }
       }
     }
@@ -349,6 +375,20 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           chat.getParticipant should startWith(sender.value)
           message.getTo should startWith(recipient.value)
           message.getBody shouldBe messageBody
+          true
+        case _ ⇒ false
+      }
+    }
+
+    def verifyMessageDelivery(testProbe: TestProbe, sender: User, recipient: User, messageIdFuture: Future[Any]): Unit = {
+      testProbe.fishForMessage(3 seconds, "notification that message has been delivered") {
+        case MessageDelivered(to, msgId) ⇒
+          messageIdFuture.value.get.get match {
+            case MessageId(messageId) ⇒ {
+              to.value should startWith(recipient.value)
+              msgId.value should equal(messageId)
+            }
+          }
           true
         case _ ⇒ false
       }

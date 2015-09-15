@@ -4,64 +4,101 @@ import Client._
 import OutOfBandData._
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
-import java.util.Collection
+import java.util.{ UUID, Collection }
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
 import org.jivesoftware.smack.XMPPException.XMPPErrorException
 import org.jivesoftware.smack.chat._
-import org.jivesoftware.smack.packet.{ XMPPError, ExtensionElement, Message, Presence }
+import org.jivesoftware.smack.packet._
 import org.jivesoftware.smack.roster.{ Roster, RosterListener }
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
+import org.jivesoftware.smackx.receipts.{ DeliveryReceiptManager, ReceiptReceivedListener }
 import scala.collection.JavaConversions._
 import scala.util.{ Failure, Success, Try }
 import akka.actor.Status.{ Failure ⇒ ActorFailure }
 
 object Client {
+
   object ConfigKeys {
     val domain = "messaging.domain"
     val host = "messaging.host"
   }
 
   case class User(value: String) extends AnyVal
+
   case class Password(value: String) extends AnyVal
+
   case class Domain(value: String) extends AnyVal
+
   case class UserWithoutDomain(value: String) extends AnyVal
+
   case class UserWithDomain(value: String) extends AnyVal
 
+  case class MessageId(value: String) extends AnyVal
+
   sealed trait State
+
   case object Unconnected extends State
+
   case object Connected extends State
+
+  case class ChatState(
+    channel: Chat,
+    unackMessages: Set[MessageId])
 
   case class Context(
     connection: Option[XMPPTCPConnection],
-    chats: Map[User, Chat],
+    chats: Map[User, ChatState],
     eventListeners: Set[ActorRef])
 
   object Messages {
+
     case class RegisterUser(user: User, password: Password)
+
     object DeleteUser
+
     case class RegisterEventListener(actor: ActorRef)
 
     case class Connect(user: User, password: Password)
+
     object Connected
+
     case class ConnectError(t: Throwable)
+
     object Disconnect
+
     object GetRoster
+
     case class GetRosterResponse(roster: Roster)
+
     case class SendMessage(recipient: User, message: String)
+
     case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
 
     sealed trait ListenerEvent
+
     case class MessageReceived(chat: Chat, message: Message) extends ListenerEvent
+
     case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
+
     case class UserBecameAvailable(user: User) extends ListenerEvent
+
     case class UserBecameUnavailable(user: User) extends ListenerEvent
 
+    case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
+
+    case class MessageDisplayed(user: User, messageId: MessageId) extends ListenerEvent
+
     sealed trait SmackError extends Throwable
+
     case class DuplicateUser(user: User) extends SmackError
+
     case class InvalidUserName(user: User) extends SmackError
+
     case class GeneralSmackError(reason: Throwable) extends SmackError
+
   }
+
 }
 
 class Client extends FSM[State, Context] {
@@ -75,13 +112,16 @@ class Client extends FSM[State, Context] {
     val (u, _) = user.value.span(c ⇒ c != '@')
     (new UserWithoutDomain(u), Domain(domain))
   }
+
   def getFullyQualifiedUser(u: UserWithoutDomain, d: Domain): UserWithDomain = {
     UserWithDomain(s"${u.value}@${d.value}")
   }
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
-      Try { connect(c.user, c.password) } match {
+      Try {
+        connect(c.user, c.password)
+      } match {
         case Success(connection) ⇒
           log.info(s"${c.user} successfully connected")
           goto(Connected) using ctx.copy(connection = Some(connection))
@@ -95,7 +135,9 @@ class Client extends FSM[State, Context] {
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
     case Event(msg: Messages.ListenerEvent, ctx) ⇒
-      ctx.eventListeners foreach { _ ! msg }
+      ctx.eventListeners foreach {
+        _ ! msg
+      }
       stay
   }
 
@@ -114,34 +156,44 @@ class Client extends FSM[State, Context] {
     case Event(Messages.RegisterEventListener(actor), ctx) ⇒
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
 
-    case Event(msg: Messages.ListenerEvent, Context(Some(connection), _, eventListeners)) ⇒
+    case Event(msg: Messages.ListenerEvent, ctx @ Context(Some(connection), chats, eventListeners)) ⇒
+      var copier = ctx
       msg match {
         case Messages.MessageReceived(chat, message) ⇒
           val (user, domain) = splitUserIntoNameAndDomain(User(chat.getParticipant))
           subscribeToStatus(connection, user, domain)
+        case Messages.MessageDelivered(recipient, messageId) ⇒
+          val chat = ctx.chats.get(recipient)
+          if (chat.isDefined)
+            copier = ctx.copy(chats = ctx.chats + (recipient -> chat.get.copy(unackMessages = chat.get.unackMessages - messageId)))
         case msg: Messages.ListenerEvent ⇒
       }
-      eventListeners foreach { _ ! msg }
-      stay
+      eventListeners foreach {
+        _ ! msg
+      }
+      stay using copier
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
       val (user, domain) = splitUserIntoNameAndDomain(recipient)
-      val chat = chats.getOrElse(key = recipient, createChat(connection, user, domain))
-      chat.sendMessage(message)
+      val chat = chats.getOrElse(key = recipient, ChatState(createChat(connection, user, domain), Set.empty))
+      val messageToSend = new Message(recipient.value, message)
+      chat.channel.sendMessage(messageToSend)
       log.info(s"message sent to $recipient")
-      stay using ctx.copy(chats = chats + (recipient → chat))
+      sender ! MessageId(messageToSend.getStanzaId)
+      stay using ctx.copy(chats = ctx.chats + (recipient → chat.copy(unackMessages = chat.unackMessages + MessageId(messageToSend.getStanzaId))))
 
     case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
       val (user, domain) = splitUserIntoNameAndDomain(recipient)
-      val chat = ctx.chats.getOrElse(key = recipient, createChat(ctx.connection.get, user, domain))
+      val chat = ctx.chats.getOrElse(key = recipient, ChatState(createChat(ctx.connection.get, user, domain), Set.empty))
       val fileInformation = OutOfBandData(fileUrl, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
       val message = new Message(recipient.value, infoText)
       message.addExtension(fileInformation)
-      chat.sendMessage(message)
+      chat.channel.sendMessage(message)
       log.info(s"file message sent to $recipient")
-      stay using ctx.copy(chats = ctx.chats + (recipient → chat))
+      sender ! MessageId(message.getStanzaId)
+      stay using ctx.copy(chats = ctx.chats + (recipient → chat.copy(unackMessages = chat.unackMessages + MessageId(message.getStanzaId))))
 
     case Event(register: Messages.RegisterUser, Context(Some(connection), chats, _)) ⇒
       log.info(s"trying to register ${register.user}")
@@ -164,7 +216,6 @@ class Client extends FSM[State, Context] {
             case _ ⇒ ActorFailure(t)
           }
           sender ! response
-
       }
       stay
 
@@ -198,11 +249,12 @@ class Client extends FSM[State, Context] {
     connection.connect().login()
     setupChatManager(connection)
     setupRosterListener(connection)
+    setupDeliveryReceiptManager(connection)
     connection
   }
 
   def disconnect(ctx: Context): Unit = {
-    ctx.chats.values.foreach(_.close())
+    ctx.chats.values.foreach(_.channel.close())
     ctx.connection.foreach(_.disconnect())
     log.info("disconnected")
   }
@@ -220,6 +272,14 @@ class Client extends FSM[State, Context] {
 
   def setupRosterListener(connection: XMPPTCPConnection): Unit =
     Roster.getInstanceFor(connection).addRosterListener(rosterListener)
+
+  def setupDeliveryReceiptManager(connection: XMPPTCPConnection): Unit = {
+    val deliveryManager = DeliveryReceiptManager.getInstanceFor(connection)
+    deliveryManager.addReceiptReceivedListener(deliveryReceiptListener)
+    deliveryManager.autoAddDeliveryReceiptRequests()
+    deliveryManager.setAutoReceiptMode(DeliveryReceiptManager.AutoReceiptMode.always)
+    log.info(s"delivery manager created")
+  }
 
   def createChat(connection: XMPPTCPConnection, recipient: UserWithoutDomain, domain: Domain): Chat = {
     val chatManager = ChatManager.getInstanceFor(connection)
@@ -267,12 +327,15 @@ class Client extends FSM[State, Context] {
     def entriesAdded(entries: Collection[String]): Unit = {
       log.debug("roster entries added: " + entries.toList)
     }
+
     def entriesDeleted(entries: Collection[String]): Unit = {
       log.debug("roster entries deleted: " + entries.toList)
     }
+
     def entriesUpdated(entries: Collection[String]): Unit = {
       log.debug("roster entries updated: " + entries.toList)
     }
+
     def presenceChanged(presence: Presence): Unit = {
       val user = User(presence.getFrom)
       presence.getType match {
@@ -284,6 +347,14 @@ class Client extends FSM[State, Context] {
           self ! Messages.UserBecameUnavailable(user)
         case _ ⇒ log.debug(s"presence changed: $presence")
       }
+    }
+  }
+
+  val deliveryReceiptListener = new ReceiptReceivedListener {
+    override def onReceiptReceived(from: String, s1to: String, receiptId: String, stanza: Stanza): Unit = {
+      log.debug(s"receipt received")
+      val user = User(from.replace("/Smack", ""))
+      self ! Messages.MessageDelivered(user, MessageId(receiptId))
     }
   }
 
