@@ -25,18 +25,18 @@ object Client {
   }
 
   case class User(value: String) extends AnyVal {
-    def splitUserIntoNameAndDomain(defaultDomain: Domain) : (UserWithoutDomain, Domain) = {
+    def splitUserIntoNameAndDomain(defaultDomain: Domain): (UserWithoutDomain, Domain) = {
       val (u, _) = value.span(c ⇒ c != '@')
       (new UserWithoutDomain(u), defaultDomain)
     }
 
-    def getFullyQualifiedUser(defaultDomain: Domain) : UserWithDomain = {
+    def getFullyQualifiedUser(defaultDomain: Domain): UserWithDomain = {
       val (user, domain) = splitUserIntoNameAndDomain(defaultDomain)
       return user getFullyQualifiedUser domain
     }
   }
 
-  case class UserWithoutDomain(value: String) extends AnyVal{
+  case class UserWithoutDomain(value: String) extends AnyVal {
     def getFullyQualifiedUser(d: Domain): UserWithDomain = {
       UserWithDomain(s"${value}@${d.value}")
     }

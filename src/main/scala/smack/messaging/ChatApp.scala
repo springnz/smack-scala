@@ -1,6 +1,6 @@
 package smack.scala
 
-import akka.actor.{Actor, ActorSystem, Props}
+import akka.actor.{ Actor, ActorSystem, Props }
 import org.jivesoftware.smack.roster.Roster
 import scala.collection.JavaConversions._
 import Client.{ User, Password }
@@ -25,7 +25,7 @@ object ChatApp extends App {
 
   class ReporterActor extends Actor {
     def receive = {
-      case MessageDelivered(user, id) =>
+      case MessageDelivered(user, id) ⇒
         computerSays(s"Message ${id.value} acknowledged by ${user.value}")
     }
   }
