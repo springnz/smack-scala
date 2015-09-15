@@ -25,21 +25,14 @@ object Client {
   }
 
   case class User(value: String) extends AnyVal
-
   case class Password(value: String) extends AnyVal
-
   case class Domain(value: String) extends AnyVal
-
   case class UserWithoutDomain(value: String) extends AnyVal
-
   case class UserWithDomain(value: String) extends AnyVal
-
   case class MessageId(value: String) extends AnyVal
 
   sealed trait State
-
   case object Unconnected extends State
-
   case object Connected extends State
 
   case class ChatState(
@@ -52,51 +45,33 @@ object Client {
     eventListeners: Set[ActorRef])
 
   object Messages {
-
     case class RegisterUser(user: User, password: Password)
-
     object DeleteUser
-
     case class RegisterEventListener(actor: ActorRef)
 
     case class Connect(user: User, password: Password)
-
     object Connected
-
     case class ConnectError(t: Throwable)
-
     object Disconnect
 
     object GetRoster
-
     case class GetRosterResponse(roster: Roster)
 
     case class SendMessage(recipient: User, message: String)
-
     case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
 
     sealed trait ListenerEvent
-
     case class MessageReceived(chat: Chat, message: Message) extends ListenerEvent
-
     case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
-
     case class UserBecameAvailable(user: User) extends ListenerEvent
-
     case class UserBecameUnavailable(user: User) extends ListenerEvent
-
     case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
-
     case class MessageDisplayed(user: User, messageId: MessageId) extends ListenerEvent
 
     sealed trait SmackError extends Throwable
-
     case class DuplicateUser(user: User) extends SmackError
-
     case class InvalidUserName(user: User) extends SmackError
-
     case class GeneralSmackError(reason: Throwable) extends SmackError
-
   }
 
 }
