@@ -1,6 +1,6 @@
 package smack.scala
 
-import akka.actor.{ ActorSystem, Props }
+import akka.actor.{Actor, ActorSystem, Props}
 import org.jivesoftware.smack.roster.Roster
 import scala.collection.JavaConversions._
 import Client.{ User, Password }
@@ -22,6 +22,14 @@ object ChatApp extends App {
   val connectPromise = chattie ? Connect(User(username), Password(password))
   Await.ready(connectPromise, timeout.duration)
   computerSays("You are connected, sir! Say `help` for usage.")
+
+  class ReporterActor extends Actor {
+    def receive = {
+      case MessageDelivered(user, id) =>
+        computerSays(s"Message ${id.value} acknowledged by ${user.value}")
+    }
+  }
+  chattie ! RegisterEventListener(system.actorOf(Props[ReporterActor]))
 
   var on = true
   while (on) {
