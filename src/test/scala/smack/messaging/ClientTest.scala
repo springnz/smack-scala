@@ -282,12 +282,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val user2Listener = newEventListener
         user2 ! RegisterEventListener(user2Listener.ref)
 
-        val user1MessageId = user1 ? SendMessage(username2, testMessage)
-        val unacked = user1 ? GetUnackMessages(username2)
-        unacked.value.get.get match {
+        val user1MessageIdFuture = (user1 ? SendMessage(username2, testMessage)).mapTo[MessageId]
+        val user1MessageId = Await.result(user1MessageIdFuture, 3 seconds)
+
+        val unackedMessageFuture = (user1 ? GetUnackMessages(username2)).mapTo[GetUnackMessagesResponse]
+        Await.result(unackedMessageFuture, 3 seconds) match {
           case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
-            ids.sameElements(Set[MessageId](user1MessageId.value.get.get.asInstanceOf[MessageId])) shouldBe true
+            ids.sameElements(Set[MessageId](user1MessageId)) shouldBe true
         }
 
         // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
@@ -295,9 +297,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user2 ! Connect(username2, user2Pass)
 
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
-        verifyMessageDelivery(user1Listener, username1, username2, user1MessageId)
-        val emptyUnacked = user1 ? GetUnackMessages(username2)
-        emptyUnacked.value.get.get match {
+        verifyMessageDelivery(user1Listener, username1, username2, user1MessageIdFuture)
+        val emptyUnacked = (user1 ? GetUnackMessages(username2)).mapTo[GetUnackMessagesResponse]
+        Await.result(emptyUnacked, 3 seconds) match {
           case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
             ids.isEmpty shouldBe true
@@ -420,7 +422,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     def verifyMessageDelivery(testProbe: TestProbe, sender: User, recipient: User, messageIdFuture: Future[Any]): Unit = {
       testProbe.fishForMessage(3 seconds, "notification that message has been delivered") {
         case MessageDelivered(to, msgId) ⇒
-          messageIdFuture.value.get.get match {
+          Await.result(messageIdFuture, 3 seconds) match {
             case MessageId(messageId) ⇒
               to.value should startWith(recipient.value)
               msgId.value should equal(messageId)
