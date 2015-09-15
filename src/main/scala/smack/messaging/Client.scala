@@ -69,7 +69,6 @@ object Client {
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
     case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
-    case class MessageDisplayed(user: User, messageId: MessageId) extends ListenerEvent
 
     sealed trait SmackError extends Throwable
     case class DuplicateUser(user: User) extends SmackError
