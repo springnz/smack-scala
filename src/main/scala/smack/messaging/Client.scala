@@ -1,5 +1,8 @@
 package smack.scala
 
+import java.io.{InputStream, File}
+import java.net.URI
+
 import Client._
 import OutOfBandData._
 import akka.actor.{ Actor, ActorRef, FSM }
@@ -48,6 +51,7 @@ object Client {
   case class Domain(value: String) extends AnyVal
   case class MessageId(value: String) extends AnyVal
 
+
   sealed trait State
   case object Unconnected extends State
   case object Connected extends State
@@ -84,7 +88,9 @@ object Client {
     case class GetRosterResponse(roster: Roster)
 
     case class SendMessage(recipient: User, message: String)
-    case class SendFileMessage(recipient: User, fileUrl: String, description: Option[String])
+    case class SendUrlMessage(recipient: User, fileUri: URI, description: FileDescription)
+    case class SendFileMessage(recipient: User, file: File, description: FileDescription)
+    case class SendStreamMessage(recipient: User, stream: InputStream, description:FileDescription)
 
     case class GetUnackMessages(user: User)
     case class GetUnackMessagesResponse(user: User, ids: Seq[MessageState])
@@ -95,6 +101,7 @@ object Client {
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
     case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
+    case class FileUploaded(user: User, description: FileDescription, uri: URI ) extends ListenerEvent
 
     sealed trait SmackError extends Throwable
     case class DuplicateUser(user: User) extends SmackError
@@ -172,11 +179,11 @@ class Client extends FSM[State, Context] {
       val msgState = MessageState(message, MessageId(messageToSend.getStanzaId), Unacknowledged)
       stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
 
-    case Event(Messages.SendFileMessage(recipient, fileUrl, description), ctx) ⇒
+    case Event(Messages.SendUrlMessage(recipient, fileUri, description), ctx) ⇒
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
       val fullUser = user getFullyQualifiedUser domain
       val chat = ctx.chats.getOrElse(key = fullUser, ChatState(createChat(ctx.connection.get, user, domain), Seq.empty))
-      val fileInformation = OutOfBandData(fileUrl, description)
+      val fileInformation = OutOfBandData(fileUri.toString, description.value)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
       val message = new Message(recipient.value, infoText)

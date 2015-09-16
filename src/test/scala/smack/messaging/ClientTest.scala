@@ -1,6 +1,9 @@
 package smack.scala
 
-import _root_.smack.scala.Client.{ MessageId, Password, User }
+import java.io.File
+import java.net.URI
+
+import _root_.smack.scala.Client.{ MessageId, Password, User}
 import Client.Messages._
 import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
@@ -60,6 +63,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         XEP_0066_FileTransfers
       }
 
+      "enables file upload" in new TestFunctions {
+        fileUpload
+      }
+
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctions {
         availability
       }
@@ -112,6 +119,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "enables XEP-0066 file transfers" in new TestFunctionsWithDomain {
         XEP_0066_FileTransfers
+      }
+
+      "enables file upload" in new TestFunctionsWithDomain {
+        fileUpload
       }
 
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
@@ -210,7 +221,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       withTwoConnectedUsers {
         val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
         val fileDescription = Some("file description")
-        user1 ! SendFileMessage(username2, fileUrl, fileDescription)
+        user1 ! SendUrlMessage(username2, URI.create(fileUrl), FileDescription(fileDescription))
 
         user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
           case FileMessageReceived(chat, message, outOfBandData) ⇒
@@ -218,6 +229,34 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             message.getTo should startWith(username2.value)
             outOfBandData.url shouldBe fileUrl
             outOfBandData.desc shouldBe fileDescription
+        }
+      }
+    }
+
+    def fileUpload = {
+      withTwoConnectedUsers {
+        val file = new File("./test/resources/shuttle.jpg")
+        val fileDescription = Some("file description")
+        user1 ! SendFileMessage(username2, file, FileDescription(fileDescription))
+
+        var fileUri = URI.create("") //how to do this less imperatively?
+        user1Listener.fishForMessage(3 seconds, "file uploaded"){
+          case FileUploaded(user, description, uri) =>
+            user.value should startWith(username1.value)
+            description shouldBe fileDescription
+            fileUri = uri
+            true
+          case _ => false
+        }
+
+        user2Listener.fishForMessage(3 seconds, "file transfer") {
+          case FileMessageReceived(chat, message, outOfBandData) ⇒
+            chat.getParticipant should startWith(username1.value)
+            message.getTo should startWith(username2.value)
+            outOfBandData.url shouldBe fileUri
+            outOfBandData.desc shouldBe fileDescription
+            true
+          case _ => false
         }
       }
     }
