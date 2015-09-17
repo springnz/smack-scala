@@ -20,6 +20,7 @@ import scala.collection.JavaConversions._
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
+import scala.concurrent.ExecutionContext.Implicits.global
 
 // this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
 // see http://docs.ejabberd.im/admin/guide/configuration/#modregister for more details
@@ -121,7 +122,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         XEP_0066_FileTransfers
       }
 
-      "enables file upload" in new TestFunctionsWithDomain {
+      "enables file upload mock" in new TestFunctionsWithDomain     {
         fileUpload
       }
 
@@ -406,9 +407,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   trait Fixture {
-    val adminUser = TestActorRef(Props[Client])
-    val user1 = TestActorRef(Props[Client])
-    val user2 = TestActorRef(Props[Client])
+    def clientCreator = Props(new Client {override lazy val uploadAdapter = UploadMock } )
+    val adminUser = TestActorRef(clientCreator)
+    val user1 = TestActorRef(clientCreator)
+    val user2 = TestActorRef(clientCreator)
     val username1 = randomUsername
     val username2 = randomUsername
     val user1Pass = Password(username1.value)
@@ -478,6 +480,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     override val username2 = nameWithDomain(randomUsername)
     override val user1Pass = Password(username1.value)
     override val user2Pass = Password(username2.value)
+  }
+
+  object UploadMock extends FileUpload {
+    var files = Map[FileDescription, File]()
+    def upload(file: File, description: FileDescription) = Future {
+      files = files + (description -> file)
+      file.toURI
+    }
   }
 
   def randomUsername = User(s"testuser-${UUID.randomUUID.toString.substring(9)}")
