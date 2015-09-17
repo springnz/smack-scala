@@ -20,6 +20,7 @@ import scala.collection.JavaConversions._
 import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
+import akka.actor.Status.{ Failure ⇒ ActorFailure }
 import scala.concurrent.ExecutionContext.Implicits.global
 
 // this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
@@ -64,8 +65,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         XEP_0066_FileTransfers
       }
 
-      "enables file upload" in new TestFunctions {
+      "enables mock file upload" in new TestFunctions {
         fileUpload
+      }
+
+      "handles file upload error mock" in new TestFunctions with UploadError {
+        fileUploadWithError
       }
 
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctions {
@@ -124,6 +129,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "enables file upload mock" in new TestFunctionsWithDomain     {
         fileUpload
+      }
+
+      "handles file upload error mock" in new TestFunctionsWithDomain with UploadError {
+        fileUploadWithError
       }
 
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
@@ -237,12 +246,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     def fileUpload = {
       withTwoConnectedUsers {
         val file = new File("./test/resources/shuttle.jpg")
-        val fileDescription = Some("file description")
-        user1 ! SendFileMessage(username2, file, FileDescription(fileDescription))
+        val fileDescription = FileDescription(Some("file description"))
+        user1 ! SendFileMessage(username2, file, fileDescription)
 
         var fileUri = URI.create("") //how to do this less imperatively?
         user1Listener.fishForMessage(3 seconds, "file uploaded"){
-          case FileUploaded(user, description, uri) =>
+          case FileUploaded(user, uri, description) =>
             user.value should startWith(username1.value)
             description shouldBe fileDescription
             fileUri = uri
@@ -256,6 +265,21 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             message.getTo should startWith(username2.value)
             outOfBandData.url shouldBe fileUri
             outOfBandData.desc shouldBe fileDescription
+            true
+          case _ => false
+        }
+      }
+    }
+
+    def fileUploadWithError = {
+      withTwoConnectedUsers {
+        val file = new File("./test/resources/shuttle.jpg")
+        val fileDescription = Some("file description")
+        user1 ! SendFileMessage(username2, file, FileDescription(fileDescription))
+
+        user1Listener.fishForMessage(3 seconds, "file upload error") {
+          case ActorFailure(FileUploadError(ex)) =>
+            ex.getMessage shouldBe UploadErrorMock.uploadErrorMsg
             true
           case _ => false
         }
@@ -406,11 +430,15 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     assert(username2.value.contains("@"))
   }
 
-  trait Fixture {
+  trait SharedFixture {
     def clientCreator = Props(new Client {override lazy val uploadAdapter = UploadMock } )
-    val adminUser = TestActorRef(clientCreator)
-    val user1 = TestActorRef(clientCreator)
-    val user2 = TestActorRef(clientCreator)
+    lazy val adminUser = TestActorRef(clientCreator)
+    lazy val user1 = TestActorRef(clientCreator)
+    lazy val user2 = TestActorRef(clientCreator)
+  }
+
+  trait Fixture extends SharedFixture {
+
     val username1 = randomUsername
     val username2 = randomUsername
     val user1Pass = Password(username1.value)
@@ -482,11 +510,26 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     override val user2Pass = Password(username2.value)
   }
 
+  trait UploadS3 extends SharedFixture {
+    override def clientCreator = Props(new Client {override lazy val uploadAdapter = UploadMock } )
+  }
+
+  trait UploadError extends SharedFixture {
+    override def clientCreator = Props(new Client {override lazy val uploadAdapter = UploadErrorMock } )
+  }
+
   object UploadMock extends FileUpload {
     var files = Map[FileDescription, File]()
     def upload(file: File, description: FileDescription) = Future {
       files = files + (description -> file)
       file.toURI
+    }
+  }
+
+  object UploadErrorMock extends  FileUpload {
+    val uploadErrorMsg = "Upload error"
+    def upload(file: File, description: FileDescription) = Future {
+      throw new Exception(uploadErrorMsg)
     }
   }
 

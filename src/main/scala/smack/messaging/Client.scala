@@ -103,13 +103,13 @@ object Client {
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
     case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
-    case class FileUploaded(user: User, description: FileDescription, uri: URI ) extends ListenerEvent
+    case class FileUploaded(forUser: User, uri: URI, description: FileDescription  ) extends ListenerEvent
 
     sealed trait SmackError extends Throwable with ListenerEvent
     case class DuplicateUser(user: User) extends SmackError
     case class InvalidUserName(user: User) extends SmackError
     case class GeneralSmackError(reason: Throwable) extends SmackError
-    case class UploadError(reason: Throwable) extends SmackError
+    case class FileUploadError(reason: Throwable) extends SmackError
   }
 }
 
@@ -170,7 +170,11 @@ class Client extends FSM[State, Context] {
           ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(messages = chat.messages.updated(index, chat.messages(index).copy(status = Acknowledged)))))
         case msg: Messages.ListenerEvent ⇒ ctx
       }
-      eventListeners foreach { _ ! msg }
+      val reportMsg = msg match {
+        case e:Messages.SmackError => ActorFailure(e)
+        case e => e
+      }
+      eventListeners foreach { _ ! reportMsg }
       stay using newCtx
 
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
@@ -202,8 +206,11 @@ class Client extends FSM[State, Context] {
     case Event(Messages.SendFileMessage(recipient, file, description), ctx) =>
       val uploadFuture = uploadAdapter.upload(file, description)
       uploadFuture onComplete  {
-        case Success(uri) => self ! Messages.SendUrlMessage(recipient, uri, description)
-        case Failure(ex) => self ! Messages.UploadError(ex)
+        case Success(uri) =>
+          self ! Messages.FileUploaded(User(ctx.connection.get.getUser), uri, description)
+          self ! Messages.SendUrlMessage(recipient, uri, description)
+        case Failure(ex) =>
+          self ! Messages.FileUploadError(ex)
       }
       stay
 
