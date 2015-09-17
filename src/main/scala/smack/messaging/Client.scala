@@ -5,6 +5,7 @@ import java.net.URI
 
 import Client._
 import OutOfBandData._
+import _root_.smack.scala.aws.S3Adapter
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import java.util.{ UUID, Collection }
@@ -17,6 +18,7 @@ import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfigur
 import org.jivesoftware.smackx.iqregister.AccountManager
 import org.jivesoftware.smackx.receipts.{ DeliveryReceiptManager, ReceiptReceivedListener }
 import scala.collection.JavaConversions._
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{ Failure, Success, Try }
 import akka.actor.Status.{ Failure ⇒ ActorFailure }
 
@@ -103,12 +105,14 @@ object Client {
     case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
     case class FileUploaded(user: User, description: FileDescription, uri: URI ) extends ListenerEvent
 
-    sealed trait SmackError extends Throwable
+    sealed trait SmackError extends Throwable with ListenerEvent
     case class DuplicateUser(user: User) extends SmackError
     case class InvalidUserName(user: User) extends SmackError
     case class GeneralSmackError(reason: Throwable) extends SmackError
+    case class UploadError(reason: Throwable) extends SmackError
   }
 }
+
 
 class Client extends FSM[State, Context] {
   startWith(Unconnected, Context(connection = None, chats = Map.empty, eventListeners = Set.empty))
@@ -116,6 +120,7 @@ class Client extends FSM[State, Context] {
   lazy val config = ConfigFactory.load()
   lazy val defaultDomain = Domain(config.getString(ConfigKeys.domain))
   lazy val host = config.getString(ConfigKeys.host)
+  lazy val uploadAdapter:FileUpload = new S3Adapter
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
@@ -193,6 +198,14 @@ class Client extends FSM[State, Context] {
       sender ! MessageId(message.getStanzaId)
       val msgState = MessageState(message.getBody, MessageId(message.getStanzaId), Unacknowledged)
       stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
+
+    case Event(Messages.SendFileMessage(recipient, file, description), ctx) =>
+      val uploadFuture = uploadAdapter.upload(file, description)
+      uploadFuture onComplete  {
+        case Success(uri) => self ! Messages.SendUrlMessage(recipient, uri, description)
+        case Failure(ex) => self ! Messages.UploadError(ex)
+      }
+      stay
 
     case Event(register: Messages.RegisterUser, Context(Some(connection), chats, _)) ⇒
       log.info(s"trying to register ${register.user}")
