@@ -229,9 +229,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     def XEP_0066_FileTransfers = {
       withTwoConnectedUsers {
-        val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
-        val fileDescription = Some("file description")
-        user1 ! SendUrlMessage(username2, URI.create(fileUrl), FileDescription(fileDescription))
+        val fileUrl = URI.create("https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md")
+        val fileDescription = FileDescription(Some("file description"))
+        user1 ! SendUrlMessage(username2, fileUrl, fileDescription)
 
         user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
           case FileMessageReceived(chat, message, outOfBandData) ⇒

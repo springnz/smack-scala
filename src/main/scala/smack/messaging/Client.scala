@@ -192,7 +192,7 @@ class Client extends FSM[State, Context] {
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
       val fullUser = user getFullyQualifiedUser domain
       val chat = ctx.chats.getOrElse(key = fullUser, ChatState(createChat(ctx.connection.get, user, domain), Seq.empty))
-      val fileInformation = OutOfBandData(fileUri.toString, description.value)
+      val fileInformation = OutOfBandData(fileUri, description)
       val infoText = "This message contains a link to a file, your client needs to " +
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
       val message = new Message(recipient.value, infoText)
