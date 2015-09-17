@@ -73,6 +73,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         fileUploadWithError
       }
 
+      "handles s3 upload" in new TestFunctions with UploadS3 {
+        fileUpload
+      }
+
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctions {
         availability
       }
@@ -133,6 +137,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "handles file upload error mock" in new TestFunctionsWithDomain with UploadError {
         fileUploadWithError
+      }
+
+      "handles s3 upload" in new TestFunctionsWithDomain with UploadS3 {
+        fileUpload
       }
 
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
@@ -250,7 +258,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendFileMessage(username2, file, fileDescription)
 
         var fileUri = URI.create("") //how to do this less imperatively?
-        user1Listener.fishForMessage(3 seconds, "file uploaded"){
+        user1Listener.fishForMessage(30 seconds, "file uploaded"){
           case FileUploaded(user, uri, description) =>
             user.value should startWith(username1.value)
             description shouldBe fileDescription
@@ -511,7 +519,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   trait UploadS3 extends SharedFixture {
-    override def clientCreator = Props(new Client {override lazy val uploadAdapter = UploadMock } )
+    override def clientCreator = Props[Client]
   }
 
   trait UploadError extends SharedFixture {
