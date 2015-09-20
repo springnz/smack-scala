@@ -1,6 +1,6 @@
 package smack.scala
 
-import java.io.{InputStream, File}
+import java.io.{ InputStream, File }
 import java.net.URI
 
 import Client._
@@ -53,7 +53,6 @@ object Client {
   case class Domain(value: String) extends AnyVal
   case class MessageId(value: String) extends AnyVal
 
-
   sealed trait State
   case object Unconnected extends State
   case object Connected extends State
@@ -92,7 +91,7 @@ object Client {
     case class SendMessage(recipient: User, message: String)
     case class SendUrlMessage(recipient: User, fileUri: URI, description: FileDescription)
     case class SendFileMessage(recipient: User, file: File, description: FileDescription)
-    case class SendStreamMessage(recipient: User, stream: InputStream, description:FileDescription)
+    case class SendStreamMessage(recipient: User, stream: InputStream, description: FileDescription)
 
     case class GetUnackMessages(user: User)
     case class GetUnackMessagesResponse(user: User, ids: Seq[MessageState])
@@ -103,7 +102,7 @@ object Client {
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
     case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
-    case class FileUploaded(forUser: User, uri: URI, description: FileDescription  ) extends ListenerEvent
+    case class FileUploaded(forUser: User, uri: URI, description: FileDescription) extends ListenerEvent
 
     sealed trait SmackError extends Throwable with ListenerEvent
     case class DuplicateUser(user: User) extends SmackError
@@ -113,14 +112,13 @@ object Client {
   }
 }
 
-
 class Client extends FSM[State, Context] {
   startWith(Unconnected, Context(connection = None, chats = Map.empty, eventListeners = Set.empty))
 
   lazy val config = ConfigFactory.load()
   lazy val defaultDomain = Domain(config.getString(ConfigKeys.domain))
   lazy val host = config.getString(ConfigKeys.host)
-  lazy val uploadAdapter:FileUpload = new S3Adapter
+  lazy val uploadAdapter: FileUpload = new S3Adapter
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
@@ -171,8 +169,8 @@ class Client extends FSM[State, Context] {
         case msg: Messages.ListenerEvent ⇒ ctx
       }
       val reportMsg = msg match {
-        case e:Messages.SmackError => ActorFailure(e)
-        case e => e
+        case e: Messages.SmackError ⇒ ActorFailure(e)
+        case e                      ⇒ e
       }
       eventListeners foreach { _ ! reportMsg }
       stay using newCtx
@@ -203,13 +201,13 @@ class Client extends FSM[State, Context] {
       val msgState = MessageState(message.getBody, MessageId(message.getStanzaId), Unacknowledged)
       stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
 
-    case Event(Messages.SendFileMessage(recipient, file, description), ctx) =>
+    case Event(Messages.SendFileMessage(recipient, file, description), ctx) ⇒
       val uploadFuture = uploadAdapter.upload(file, description)
-      uploadFuture onComplete  {
-        case Success(uri) =>
+      uploadFuture onComplete {
+        case Success(uri) ⇒
           self ! Messages.FileUploaded(User(ctx.connection.get.getUser), uri, description)
           self ! Messages.SendUrlMessage(recipient, uri, description)
-        case Failure(ex) =>
+        case Failure(ex) ⇒
           log.error(ex, s"could not upload file!")
           self ! Messages.FileUploadError(ex)
       }

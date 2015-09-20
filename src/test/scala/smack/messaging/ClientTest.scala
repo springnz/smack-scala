@@ -3,7 +3,7 @@ package smack.scala
 import java.io.File
 import java.net.URI
 
-import _root_.smack.scala.Client.{ MessageId, Password, User}
+import _root_.smack.scala.Client.{ MessageId, Password, User }
 import Client.Messages._
 import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
@@ -135,7 +135,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         XEP_0066_FileTransfers
       }
 
-      "enables file upload mock" in new TestFunctionsWithDomain     {
+      "enables file upload mock" in new TestFunctionsWithDomain {
         fileUpload
       }
 
@@ -266,16 +266,16 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendFileMessage(username2, file, fileDescription)
 
         var fileUri = URI.create("") //how to do this less imperatively?
-        user1Listener.fishForMessage(30 seconds, "file uploaded"){
-          case FileUploaded(user, uri, description) =>
+        user1Listener.fishForMessage(30 seconds, "file uploaded") {
+          case FileUploaded(user, uri, description) ⇒
             user.value should startWith(username1.value)
             description shouldBe fileDescription
             fileUri = uri
             true
-          case ActorFailure(FileUploadError(ex)) =>
+          case ActorFailure(FileUploadError(ex)) ⇒
             throw new Exception(ex)
             false
-          case _ => false
+          case _ ⇒ false
         }
 
         user2Listener.fishForMessage(3 seconds, "file transfer") {
@@ -285,7 +285,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             outOfBandData.url shouldBe fileUri
             outOfBandData.desc shouldBe fileDescription
             true
-          case _ => false
+          case _ ⇒ false
         }
       }
     }
@@ -297,9 +297,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendFileMessage(username2, file, FileDescription(fileDescription))
 
         user1Listener.fishForMessage(3 seconds, "file upload error") {
-          case ActorFailure(FileUploadError(ex)) =>
+          case ActorFailure(FileUploadError(ex)) ⇒
             true
-          case _ => false
+          case _ ⇒ false
         }
       }
     }
@@ -449,7 +449,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   trait SharedFixture {
-    def clientCreator = Props(new Client {override lazy val uploadAdapter = UploadMock } )
+    def clientCreator = Props(new Client { override lazy val uploadAdapter = UploadMock })
     lazy val adminUser = TestActorRef(clientCreator)
     lazy val user1 = TestActorRef(clientCreator)
     lazy val user2 = TestActorRef(clientCreator)
@@ -533,7 +533,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   trait UploadError extends SharedFixture {
-    override def clientCreator = Props(new Client {override lazy val uploadAdapter = UploadErrorMock } )
+    override def clientCreator = Props(new Client { override lazy val uploadAdapter = UploadErrorMock })
   }
 
   object UploadMock extends FileUpload {
@@ -544,7 +544,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
   }
 
-  object UploadErrorMock extends  FileUpload {
+  object UploadErrorMock extends FileUpload {
     val uploadErrorMsg = "Upload error"
     def upload(file: File, description: FileDescription) = Future {
       throw new Exception(uploadErrorMsg)
