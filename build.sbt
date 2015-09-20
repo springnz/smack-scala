@@ -4,7 +4,7 @@ version := "1.0.0-SNAPSHOT"
 scalaVersion := "2.11.7"
 val smackVersion = "4.1.3"
 val akkaVersion = "2.3.12"
-val awsVersion = "0.5.+"
+val awsVersion = "0.5.3"
 
 fork in Test := false
 
