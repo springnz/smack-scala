@@ -77,6 +77,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         fileUpload
       }
 
+      "handles s3 upload with error" in new TestFunctions with UploadS3 {
+        fileUploadWithError
+      }
+
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctions {
         availability
       }
@@ -141,6 +145,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "handles s3 upload" in new TestFunctionsWithDomain with UploadS3 {
         fileUpload
+      }
+
+      "handles s3 upload with error" in new TestFunctionsWithDomain with UploadS3 {
+        fileUploadWithError
       }
 
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
@@ -253,8 +261,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     def fileUpload = {
       withTwoConnectedUsers {
-        val file = new File("./test/resources/shuttle.jpg")
-        val fileDescription = FileDescription(Some("file description"))
+        val file = new File("./src/test/resources/shuttle.jpg")
+        val fileDescription = FileDescription(Some("shuttle.jpg"))
         user1 ! SendFileMessage(username2, file, fileDescription)
 
         var fileUri = URI.create("") //how to do this less imperatively?
@@ -264,6 +272,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             description shouldBe fileDescription
             fileUri = uri
             true
+          case ActorFailure(FileUploadError(ex)) =>
+            throw new Exception(ex)
+            false
           case _ => false
         }
 
@@ -281,13 +292,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     def fileUploadWithError = {
       withTwoConnectedUsers {
-        val file = new File("./test/resources/shuttle.jpg")
+        val file = new File("erroredimage")
         val fileDescription = Some("file description")
         user1 ! SendFileMessage(username2, file, FileDescription(fileDescription))
 
         user1Listener.fishForMessage(3 seconds, "file upload error") {
           case ActorFailure(FileUploadError(ex)) =>
-            ex.getMessage shouldBe UploadErrorMock.uploadErrorMsg
             true
           case _ => false
         }

@@ -210,6 +210,7 @@ class Client extends FSM[State, Context] {
           self ! Messages.FileUploaded(User(ctx.connection.get.getUser), uri, description)
           self ! Messages.SendUrlMessage(recipient, uri, description)
         case Failure(ex) =>
+          log.error(ex, s"could not upload file!")
           self ! Messages.FileUploadError(ex)
       }
       stay
