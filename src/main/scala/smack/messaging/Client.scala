@@ -202,8 +202,7 @@ class Client extends FSM[State, Context] {
       stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
 
     case Event(Messages.SendFileMessage(recipient, file, description), ctx) ⇒
-      val uploadFuture = uploadAdapter.upload(file, description)
-      uploadFuture onComplete {
+      uploadAdapter.upload(file, description) onComplete {
         case Success(uri) ⇒
           self ! Messages.FileUploaded(User(ctx.connection.get.getUser), uri, description)
           self ! Messages.SendUrlMessage(recipient, uri, description)

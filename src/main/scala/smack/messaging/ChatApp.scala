@@ -3,7 +3,7 @@ package smack.scala
 import akka.actor.{ Actor, ActorSystem, Props }
 import org.jivesoftware.smack.roster.Roster
 import scala.collection.JavaConversions._
-import _root_.smack.scala.Client.{ User, Password }
+import smack.scala.Client.{ User, Password }
 import akka.util.Timeout
 import concurrent.duration._
 import concurrent.Await
