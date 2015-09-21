@@ -1,19 +1,48 @@
 package smack.scala
 
-import java.text.SimpleDateFormat
-import java.util.Date
-
 import org.joda.time.format.ISODateTimeFormat
-import smack.scala.Client.{ MessageId, User, Domain }
+import smack.scala.Client.{ MessageId, User, Domain, UserWithDomain }
 import org.scalatest.{ Matchers, WordSpec }
-import scala.reflect.macros.ParseException
 import scala.util.Success
 
 class MessageArchiveRequestTest extends WordSpec with Matchers {
 
-  "serialises user" in {
-    val req = MessageArchiveRequest(User("testUser").getFullyQualifiedUser(Domain("testDomain")))
-    MessageArchiveRequest.fromXml(req.toXML) shouldBe Success(req)
+  "Message serialization having" when {
+
+    "user" in {
+      val req = MessageArchiveRequest(UserWithDomain("test@test.com"))
+      MessageArchiveRequest.fromXml(req.toXML) shouldBe Success(req)
+    }
+
+    "start" in {
+      val start = ISODateTimeFormat.dateTimeParser().parseDateTime("2010-06-07T00:00:00Z")
+      val req = MessageArchiveRequest(UserWithDomain("test@test.com"), start = Some(start))
+      MessageArchiveRequest.fromXml(req.toXML) shouldBe Success(req)
+    }
+
+    "start and end" in {
+      val start = ISODateTimeFormat.dateTimeParser().parseDateTime("2010-06-07T00:00:00Z")
+      val end = ISODateTimeFormat.dateTimeParser().parseDateTime("2010-07-07T00:00:00Z")
+      val req = MessageArchiveRequest(UserWithDomain("test@test.com"), start = Some(start), end = Some(end))
+      MessageArchiveRequest.fromXml(req.toXML) shouldBe Success(req)
+    }
+
+    "limit" in {
+      val req = MessageArchiveRequest(UserWithDomain("test@test.com"), limit = Some(15))
+      MessageArchiveRequest.fromXml(req.toXML) shouldBe Success(req)
+    }
+
+    "skipTo" in {
+      val req = MessageArchiveRequest(UserWithDomain("test@test.com"), skipTo = Some(MessageId("skipId")))
+      MessageArchiveRequest.fromXml(req.toXML) shouldBe Success(req)
+    }
+
+    "everything" in {
+      val start = ISODateTimeFormat.dateTimeParser().parseDateTime("2010-06-07T00:00:00Z")
+      val end = ISODateTimeFormat.dateTimeParser().parseDateTime("2010-07-07T00:00:00Z")
+      val req = MessageArchiveRequest(UserWithDomain("test@test.com"), start = Some(start), end = Some(end), limit = Some(15), skipTo = Some(MessageId("skipId")))
+      MessageArchiveRequest.fromXml(req.toXML) shouldBe Success(req)
+    }
   }
 
   "XML parsing" when {

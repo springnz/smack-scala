@@ -1,9 +1,6 @@
 package smack.scala
 
-import java.net.URI
-
-import smack.scala.Client.{ User, MessageId, UserWithDomain, Domain }
-import org.jivesoftware.smack.packet.ExtensionElement
+import smack.scala.Client.{ MessageId, UserWithDomain }
 import org.jivesoftware.smack.packet.IQ
 import org.jivesoftware.smack.packet.IQ.IQChildElementXmlStringBuilder
 import org.joda.time.DateTime
@@ -65,12 +62,12 @@ object MessageArchiveRequest {
       val end = allFields.get("end") map (f ⇒ ISODateTimeFormat.dateTimeParser().parseDateTime(f.fieldValue))
       val limit = allFields.get("max") map (m ⇒ Integer.parseInt(m.fieldValue))
       val skipTo = allFields.get("after") map (f ⇒ new MessageId(f.fieldValue))
-      MessageArchiveRequest(UserWithDomain(withField.get.fieldValue), None, start, end, limit, skipTo)
+      MessageArchiveRequest(UserWithDomain(withField.get.fieldValue), start, end, limit, skipTo)
 
     }
 }
 
-case class MessageArchiveRequest(user: UserWithDomain, withUser: Option[UserWithDomain] = None, start: Option[DateTime] = None, end: Option[DateTime] = None, limit: Option[Int] = None, skipTo: Option[MessageId] = None) extends IQ(MessageArchiveRequest.ElementName, MessageArchiveRequest.XmlNamespace) {
+case class MessageArchiveRequest(user: UserWithDomain, start: Option[DateTime] = None, end: Option[DateTime] = None, limit: Option[Int] = None, skipTo: Option[MessageId] = None) extends IQ(MessageArchiveRequest.ElementName, MessageArchiveRequest.XmlNamespace) {
   super.setType(IQ.Type.set)
 
   def dataXml: CharSequence =
@@ -78,7 +75,7 @@ case class MessageArchiveRequest(user: UserWithDomain, withUser: Option[UserWith
       <field var="FORM_TYPE" type="hidden"><value>{ MessageArchiveRequest.XmlNamespace }</value></field>
       <field var="with"><value>{ user.value }</value></field>
       { start match { case Some(date) ⇒ <field var="start"><value>{ date }</value></field>; case _ ⇒ "" } }
-      { end match { case Some(date) ⇒ <field var="start"><value>{ date }</value></field>; case _ ⇒ "" } }
+      { end match { case Some(date) ⇒ <field var="end"><value>{ date }</value></field>; case _ ⇒ "" } }
     </x>.toString
 
   def pagingXml: CharSequence =
@@ -86,7 +83,7 @@ case class MessageArchiveRequest(user: UserWithDomain, withUser: Option[UserWith
     else
       <set xmlns={ MessageArchiveRequest.PagingNamespace }>
         { limit match { case Some(max) ⇒ <max>{ max }</max>; case _ ⇒ "" } }
-        { skipTo match { case Some(msgId) ⇒ <after>{ msgId }</after>; case _ ⇒ "" } }
+        { skipTo match { case Some(msgId) ⇒ <after>{ msgId.value }</after>; case _ ⇒ "" } }
       </set>.toString
 
   override def getIQChildElementBuilder(xml: IQChildElementXmlStringBuilder): IQChildElementXmlStringBuilder = {
