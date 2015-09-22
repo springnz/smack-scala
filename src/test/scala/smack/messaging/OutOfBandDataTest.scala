@@ -1,17 +1,19 @@
 package smack.scala
 
+import java.net.URI
+
 import org.scalatest.{ Matchers, WordSpec }
 import scala.util.Success
 
 class OutOfBandDataTest extends WordSpec with Matchers {
 
   "serialises and deserialises url" in {
-    val oob = OutOfBandData("url")
+    val oob = OutOfBandData(URI.create("url"))
     OutOfBandData.fromXml(oob.toXML) shouldBe Success(oob)
   }
 
   "serialises and deserialises url and description" in {
-    val oob = OutOfBandData("url", Some("optional description"))
+    val oob = OutOfBandData(URI.create("url"), FileDescription(Some("optional description")))
     OutOfBandData.fromXml(oob.toXML) shouldBe Success(oob)
   }
 

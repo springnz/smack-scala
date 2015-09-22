@@ -1,13 +1,14 @@
 package smack.scala
 
-import akka.actor.{ ActorSystem, Props }
+import akka.actor.{ Actor, ActorSystem, Props }
 import org.jivesoftware.smack.roster.Roster
 import scala.collection.JavaConversions._
-import Client.{ User, Password }
+import smack.scala.Client.{ User, Password }
 import akka.util.Timeout
 import concurrent.duration._
 import concurrent.Await
 import akka.pattern.ask
+import java.net.URI
 
 object ChatApp extends App {
   import Client.Messages._
@@ -22,6 +23,14 @@ object ChatApp extends App {
   val connectPromise = chattie ? Connect(User(username), Password(password))
   Await.ready(connectPromise, timeout.duration)
   computerSays("You are connected, sir! Say `help` for usage.")
+
+  class ReporterActor extends Actor {
+    def receive = {
+      case MessageDelivered(user, id) ⇒
+        computerSays(s"Message ${id.value} acknowledged by ${user.value}")
+    }
+  }
+  chattie ! RegisterEventListener(system.actorOf(Props[ReporterActor]))
 
   var on = true
   while (on) {
@@ -53,7 +62,7 @@ object ChatApp extends App {
         val user = User(io.StdIn.readLine)
         computerSays(s"What is the file url, sir?")
         val fileUrl = io.StdIn.readLine
-        chattie ! SendFileMessage(user, fileUrl, description = None)
+        chattie ! SendUrlMessage(user, URI.create(fileUrl), FileDescription(None))
 
       case "exit" ⇒
         chattie ! Disconnect

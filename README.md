@@ -4,3 +4,6 @@ Akka based Scala wrapper for [Smack](https://github.com/igniterealtime/Smack) (X
 ## Running tests requires a running ejabberd
 * ensure ejabberd is running
 * configure admin user, domain and host in src/test/resources/application.conf
+
+## AWS requires credential file configuration
+* Set up credentials for [AWS](http://docs.aws.amazon.com/AWSSdkDocsJava/latest/DeveloperGuide/credentials.html#credentials-file-format)

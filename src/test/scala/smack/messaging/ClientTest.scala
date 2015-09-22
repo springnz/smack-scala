@@ -1,6 +1,9 @@
 package smack.scala
 
-import Client.{ Password, User }
+import java.io.File
+import java.net.URI
+
+import _root_.smack.scala.Client.{ MessageId, Password, User }
 import Client.Messages._
 import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
@@ -14,9 +17,11 @@ import org.scalatest
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
-import scala.concurrent.Await
+import scala.concurrent.{ Future, Await }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
+import akka.actor.Status.{ Failure ⇒ ActorFailure }
+import scala.concurrent.ExecutionContext.Implicits.global
 
 // this test depends on a running xmpp server (e.g. ejabberd) configured so that admin users can create unlimited users in your environment!
 // see http://docs.ejabberd.im/admin/guide/configuration/#modregister for more details
@@ -60,6 +65,22 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         XEP_0066_FileTransfers
       }
 
+      "enables mock file upload" in new TestFunctions {
+        fileUpload
+      }
+
+      "handles file upload error mock" in new TestFunctions with UploadError {
+        fileUploadWithError
+      }
+
+      "handles s3 upload" in new TestFunctions with UploadS3 {
+        fileUpload
+      }
+
+      "handles s3 upload with error" in new TestFunctions with UploadS3 {
+        fileUploadWithError
+      }
+
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctions {
         availability
       }
@@ -70,6 +91,18 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "message receiver subscribes to sender" in new TestFunctions {
         receiverConnects
+      }
+
+      "message delivered acknowledgement" in new TestFunctions {
+        deliveryAcknowledged
+      }
+
+      "async message delivered acknowledgement" in new TestFunctions {
+        asyncDeliveryAck
+      }
+
+      "message unack tracking" in new TestFunctions {
+        deliveryEnsureIdTracking
       }
     }
 
@@ -102,6 +135,22 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         XEP_0066_FileTransfers
       }
 
+      "enables file upload mock" in new TestFunctionsWithDomain {
+        fileUpload
+      }
+
+      "handles file upload error mock" in new TestFunctionsWithDomain with UploadError {
+        fileUploadWithError
+      }
+
+      "handles s3 upload" in new TestFunctionsWithDomain with UploadS3 {
+        fileUpload
+      }
+
+      "handles s3 upload with error" in new TestFunctionsWithDomain with UploadS3 {
+        fileUploadWithError
+      }
+
       "informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
         availability
       }
@@ -112,6 +161,18 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "message receiver subscribes to sender" in new TestFunctionsWithDomain {
         receiverConnects
+      }
+
+      "message delivered acknowledgement" in new TestFunctionsWithDomain {
+        deliveryAcknowledged
+      }
+
+      "async message delivered acknowledgement" in new TestFunctionsWithDomain {
+        asyncDeliveryAck
+      }
+
+      "message unack tracking" in new TestFunctionsWithDomain {
+        deliveryEnsureIdTracking
       }
     }
   }
@@ -184,9 +245,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     def XEP_0066_FileTransfers = {
       withTwoConnectedUsers {
-        val fileUrl = "https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md"
-        val fileDescription = Some("file description")
-        user1 ! SendFileMessage(username2, fileUrl, fileDescription)
+        val fileUrl = URI.create("https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md")
+        val fileDescription = FileDescription(Some("file description"))
+        user1 ! SendUrlMessage(username2, fileUrl, fileDescription)
 
         user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
           case FileMessageReceived(chat, message, outOfBandData) ⇒
@@ -194,6 +255,51 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             message.getTo should startWith(username2.value)
             outOfBandData.url shouldBe fileUrl
             outOfBandData.desc shouldBe fileDescription
+        }
+      }
+    }
+
+    def fileUpload = {
+      withTwoConnectedUsers {
+        val file = new File("./src/test/resources/shuttle.jpg")
+        val fileDescription = FileDescription(Some("shuttle.jpg"))
+        user1 ! SendFileMessage(username2, file, fileDescription)
+
+        var fileUri = URI.create("") //how to do this less imperatively?
+        user1Listener.fishForMessage(30 seconds, "file uploaded") {
+          case FileUploaded(user, uri, description) ⇒
+            user.value should startWith(username1.value)
+            description shouldBe fileDescription
+            fileUri = uri
+            true
+          case ActorFailure(FileUploadError(ex)) ⇒
+            throw new Exception(ex)
+            false
+          case _ ⇒ false
+        }
+
+        user2Listener.fishForMessage(3 seconds, "file transfer") {
+          case FileMessageReceived(chat, message, outOfBandData) ⇒
+            chat.getParticipant should startWith(username1.value)
+            message.getTo should startWith(username2.value)
+            outOfBandData.url shouldBe fileUri
+            outOfBandData.desc shouldBe fileDescription
+            true
+          case _ ⇒ false
+        }
+      }
+    }
+
+    def fileUploadWithError = {
+      withTwoConnectedUsers {
+        val file = new File("erroredimage")
+        val fileDescription = Some("file description")
+        user1 ! SendFileMessage(username2, file, FileDescription(fileDescription))
+
+        user1Listener.fishForMessage(3 seconds, "file upload error") {
+          case ActorFailure(FileUploadError(ex)) ⇒
+            true
+          case _ ⇒ false
         }
       }
     }
@@ -206,6 +312,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
             true
+          case _ ⇒ false
         }
 
         user2 ! Disconnect
@@ -213,6 +320,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case UserBecameUnavailable(user) ⇒
             user.value should startWith(username2.value)
             true
+          case _ ⇒ false
         }
 
         user2 ! Connect(username2, user2Pass)
@@ -220,6 +328,64 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
             true
+          case _ ⇒ false
+        }
+      }
+    }
+
+    def deliveryAcknowledged = {
+      withTwoConnectedUsers {
+        val user1MessageId = user1 ? SendMessage(username2, testMessage)
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        verifyMessageDelivery(user1Listener, username1, username2, user1MessageId)
+      }
+    }
+
+    def asyncDeliveryAck: Unit = {
+      withTwoUsers {
+        user1 ! Connect(username1, user1Pass)
+        val user2Listener = newEventListener
+        user2 ! RegisterEventListener(user2Listener.ref)
+
+        val user1MessageId = user1 ? SendMessage(username2, testMessage)
+
+        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
+        Thread.sleep(1000)
+        user2 ! Connect(username2, user2Pass)
+
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        verifyMessageDelivery(user1Listener, username1, username2, user1MessageId)
+      }
+    }
+
+    def deliveryEnsureIdTracking = {
+      withTwoUsers {
+        user1 ! Connect(username1, user1Pass)
+        val user2Listener = newEventListener
+        user2 ! RegisterEventListener(user2Listener.ref)
+
+        val user1MessageIdFuture = (user1 ? SendMessage(username2, testMessage)).mapTo[MessageId]
+        val user1MessageId = Await.result(user1MessageIdFuture, 3 seconds)
+
+        val unackedMessageFuture = (user1 ? GetUnackMessages(username2)).mapTo[GetUnackMessagesResponse]
+        Await.result(unackedMessageFuture, 3 seconds) match {
+          case GetUnackMessagesResponse(user, ids) ⇒
+            user.value should startWith(username2.value)
+            ids.size shouldBe 1
+            ids(0).id shouldBe user1MessageId
+        }
+
+        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
+        Thread.sleep(1000)
+        user2 ! Connect(username2, user2Pass)
+
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        verifyMessageDelivery(user1Listener, username1, username2, user1MessageIdFuture)
+        val emptyUnacked = (user1 ? GetUnackMessages(username2)).mapTo[GetUnackMessagesResponse]
+        Await.result(emptyUnacked, 3 seconds) match {
+          case GetUnackMessagesResponse(user, ids) ⇒
+            user.value should startWith(username2.value)
+            ids.isEmpty shouldBe true
         }
       }
     }
@@ -237,6 +403,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             entry.getUser should startWith(username2.value)
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
             true
+          case _ ⇒ false
         }
 
         user2 ! Disconnect
@@ -248,6 +415,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             entry.getUser should startWith(username2.value)
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.unavailable
             true
+          case _ ⇒ false
         }
       }
     }
@@ -280,10 +448,15 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     assert(username2.value.contains("@"))
   }
 
-  trait Fixture {
-    val adminUser = TestActorRef(Props[Client])
-    val user1 = TestActorRef(Props[Client])
-    val user2 = TestActorRef(Props[Client])
+  trait SharedFixture {
+    def clientCreator = Props(new Client { override lazy val uploadAdapter = UploadMock })
+    lazy val adminUser = TestActorRef(clientCreator)
+    lazy val user1 = TestActorRef(clientCreator)
+    lazy val user2 = TestActorRef(clientCreator)
+  }
+
+  trait Fixture extends SharedFixture {
+
     val username1 = randomUsername
     val username2 = randomUsername
     val user1Pass = Password(username1.value)
@@ -333,6 +506,19 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         case _ ⇒ false
       }
     }
+
+    def verifyMessageDelivery(testProbe: TestProbe, sender: User, recipient: User, messageIdFuture: Future[Any]): Unit = {
+      testProbe.fishForMessage(3 seconds, "notification that message has been delivered") {
+        case MessageDelivered(to, msgId) ⇒
+          Await.result(messageIdFuture, 3 seconds) match {
+            case MessageId(messageId) ⇒
+              to.value should startWith(recipient.value)
+              msgId.value should equal(messageId)
+          }
+          true
+        case _ ⇒ false
+      }
+    }
   }
 
   trait FixtureWithDomain extends Fixture {
@@ -340,6 +526,29 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     override val username2 = nameWithDomain(randomUsername)
     override val user1Pass = Password(username1.value)
     override val user2Pass = Password(username2.value)
+  }
+
+  trait UploadS3 extends SharedFixture {
+    override def clientCreator = Props[Client]
+  }
+
+  trait UploadError extends SharedFixture {
+    override def clientCreator = Props(new Client { override lazy val uploadAdapter = UploadErrorMock })
+  }
+
+  object UploadMock extends FileUpload {
+    var files = Map[FileDescription, File]()
+    def upload(file: File, description: FileDescription) = Future {
+      files = files + (description -> file)
+      file.toURI
+    }
+  }
+
+  object UploadErrorMock extends FileUpload {
+    val uploadErrorMsg = "Upload error"
+    def upload(file: File, description: FileDescription) = Future {
+      throw new Exception(uploadErrorMsg)
+    }
   }
 
   def randomUsername = User(s"testuser-${UUID.randomUUID.toString.substring(9)}")
