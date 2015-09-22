@@ -48,7 +48,6 @@ object MAMResponse extends ExtensionInfoProvider {
       val message = forwardNode \ "message"
       assert(message.size == 1, s"message missing in $xml")
       val parser = XmlPullParserFactory.newInstance().newPullParser()
-      println(message(0).toString)
       parser.setInput(new StringReader(message(0).toString))
       parser.nextTag()
       val parsedMessage = PacketParserUtils.parseMessage(parser)
