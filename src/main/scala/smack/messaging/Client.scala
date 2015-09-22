@@ -344,6 +344,7 @@ class Client extends FSM[State, Context] {
   }
 
   def setupCustomExtensions(connection: XMPPTCPConnection) = {
+    ProviderManager.addExtensionProvider(OutOfBandData.ElementName, OutOfBandData.XmlNamespace, OutOfBandDataProvider)
     ProviderManager.addExtensionProvider(MAMResponse.ElementName, MAMResponse.XmlNamespace, MAMResponseProvider)
     ProviderManager.addExtensionProvider(MAMFin.ElementName, MAMFin.XmlNamespace, MAMFinProvider)
   }
@@ -371,8 +372,8 @@ class Client extends FSM[State, Context] {
               self ! Messages.MessageReceived(chat, message)
           }
 
-          case MAMResponse(msg, origStamp, id, queryId) ⇒ self ! Messages.ArchiveMessageResponse(User(msg.getTo), User(msg.getFrom), msg, origStamp, id, queryId)
-          case MAMFin(firstMessageId, lastMessageId, index, count, complete) => println("END!"); self ! Messages.ArchiveMessageEnd(firstMessageId, lastMessageId, index, count, complete)
+          case MAMResponse(msg, origStamp, id, queryId)                      ⇒ self ! Messages.ArchiveMessageResponse(User(msg.getTo), User(msg.getFrom), msg, origStamp, id, queryId)
+          case MAMFin(firstMessageId, lastMessageId, index, count, complete) ⇒ self ! Messages.ArchiveMessageEnd(firstMessageId, lastMessageId, index, count, complete)
         }
       }
     }
