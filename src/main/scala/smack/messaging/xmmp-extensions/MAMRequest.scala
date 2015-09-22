@@ -1,4 +1,4 @@
-package smack.scala
+package smack.scala.extensions
 
 import smack.scala.Client.{ MessageId, UserWithDomain }
 import org.jivesoftware.smack.packet.IQ
@@ -11,13 +11,13 @@ import scala.xml.XML
 // implementation of XEP-0313 Message Archive Management, for querying XMMP server for historical messages
 // see http://xmpp.org/extensions/xep-0313.html
 
-object MessageArchiveRequest {
+object MAMRequest {
   val XmlNamespace = "urn:xmpp:mam:0"
   val ElementName = "query"
   val DataNamespace = "jabber:x:data"
   val PagingNamespace = "http://jabber.org/protocol/rsm"
 
-  def fromXml(xml: CharSequence): Try[MessageArchiveRequest] =
+  def fromXml(xml: CharSequence): Try[MAMRequest] =
     Try {
       val root = XML.loadString(xml.toString)
       assert(root.label == "iq", s"message must be iq type in $xml")
@@ -62,17 +62,19 @@ object MessageArchiveRequest {
       val end = allFields.get("end") map (f ⇒ ISODateTimeFormat.dateTimeParser().parseDateTime(f.fieldValue))
       val limit = allFields.get("max") map (m ⇒ Integer.parseInt(m.fieldValue))
       val skipTo = allFields.get("after") map (f ⇒ new MessageId(f.fieldValue))
-      MessageArchiveRequest(UserWithDomain(withField.get.fieldValue), start, end, limit, skipTo)
+      MAMRequest(UserWithDomain(withField.get.fieldValue), start, end, limit, skipTo)
 
     }
 }
 
-case class MessageArchiveRequest(user: UserWithDomain, start: Option[DateTime] = None, end: Option[DateTime] = None, limit: Option[Int] = None, skipTo: Option[MessageId] = None) extends IQ(MessageArchiveRequest.ElementName, MessageArchiveRequest.XmlNamespace) {
+case class MAMRequest(user: UserWithDomain, start: Option[DateTime] = None, end: Option[DateTime] = None, limit: Option[Int] = None, skipTo: Option[MessageId] = None) extends IQ(MAMRequest.ElementName, MAMRequest.XmlNamespace) {
   super.setType(IQ.Type.set)
 
+  import MAMRequest._
+
   def dataXml: CharSequence =
-    <x xmlns={ MessageArchiveRequest.DataNamespace } type="submit">
-      <field var="FORM_TYPE" type="hidden"><value>{ MessageArchiveRequest.XmlNamespace }</value></field>
+    <x xmlns={ DataNamespace } type="submit">
+      <field var="FORM_TYPE" type="hidden"><value>{ XmlNamespace }</value></field>
       <field var="with"><value>{ user.value }</value></field>
       { start match { case Some(date) ⇒ <field var="start"><value>{ date }</value></field>; case _ ⇒ "" } }
       { end match { case Some(date) ⇒ <field var="end"><value>{ date }</value></field>; case _ ⇒ "" } }
@@ -81,7 +83,7 @@ case class MessageArchiveRequest(user: UserWithDomain, start: Option[DateTime] =
   def pagingXml: CharSequence =
     if (!limit.isDefined && !skipTo.isDefined) ""
     else
-      <set xmlns={ MessageArchiveRequest.PagingNamespace }>
+      <set xmlns={ PagingNamespace }>
         { limit match { case Some(max) ⇒ <max>{ max }</max>; case _ ⇒ "" } }
         { skipTo match { case Some(msgId) ⇒ <after>{ msgId.value }</after>; case _ ⇒ "" } }
       </set>.toString

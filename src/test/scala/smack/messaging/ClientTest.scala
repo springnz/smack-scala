@@ -4,7 +4,7 @@ import java.io.File
 import java.net.URI
 
 import _root_.smack.scala.Client.{ MessageId, Password, User }
-import Client.Messages._
+import _root_.smack.scala.Client.Messages._
 import akka.actor.{ ActorSystem, Props }
 import akka.pattern.ask
 import akka.testkit.{ TestActorRef, TestProbe }
@@ -173,6 +173,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "message unack tracking" in new TestFunctionsWithDomain {
         deliveryEnsureIdTracking
+      }
+
+      "message history" in new TestFunctionsWithDomain {
+        chatHistory
       }
     }
   }
@@ -434,6 +438,28 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             roster.getPresence(entry.getUser).getType shouldBe Presence.Type.available
             true
         }
+      }
+    }
+
+    def chatHistory = {
+      withTwoConnectedUsers{
+        user1 ! SendMessage(username2, testMessage)
+        verifyMessageArrived(user2Listener, username1, username2, testMessage)
+        user1 ! ArchiveMessageRequest(username2)
+        user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
+          case ArchiveMessageResponse(to, from, msg, origStamp, id, _) ⇒
+            to.value shouldBe username2.value
+            from.value shouldBe username1.value + "/Smack"
+            msg.getBody shouldBe testMessage
+            true
+          case _ => false
+        }
+
+        user1Listener.fishForMessage(3 seconds, "notification that user1 is sent end message") {
+          case m @ ArchiveMessageEnd ⇒ true
+          case _ => false
+        }
+
       }
     }
 

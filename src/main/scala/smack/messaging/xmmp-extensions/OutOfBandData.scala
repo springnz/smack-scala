@@ -1,7 +1,8 @@
-package smack.scala
+package smack.scala.extensions
 
 import java.net.URI
 
+import smack.scala.FileDescription
 import org.jivesoftware.smack.packet.ExtensionElement
 import org.jivesoftware.smack.packet.IQ
 import org.jivesoftware.smack.packet.IQ.IQChildElementXmlStringBuilder
@@ -12,7 +13,7 @@ import scala.xml.XML
 // see http://xmpp.org/extensions/xep-0066.html
 // leaving out the IQ negotiation parts because they are complex and require both clients to be online
 
-object OutOfBandData {
+object OutOfBandData extends ExtensionInfoProvider {
   val XmlNamespace = "jabber:x:oob"
   val ElementName = "x"
 
