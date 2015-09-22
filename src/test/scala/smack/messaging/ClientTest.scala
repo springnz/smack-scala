@@ -442,9 +442,11 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def chatHistory = {
-      withTwoConnectedUsers{
+      withTwoConnectedUsers {
         user1 ! SendMessage(username2, testMessage)
-        user1 ! SendMessage(username2, testMessage)
+
+        val anotherMessage = "another Message"
+        user1 ! SendMessage(username2, anotherMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
         user1 ! ArchiveMessageRequest(username2)
         user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
@@ -453,12 +455,21 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             from.value shouldBe username1.value + "/Smack"
             msg.getBody shouldBe testMessage
             true
-          case _ => false
+          case _ ⇒ false
+        }
+
+        user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
+          case ArchiveMessageResponse(to, from, msg, origStamp, id, _) ⇒
+            to.value shouldBe username2.value
+            from.value shouldBe username1.value + "/Smack"
+            msg.getBody shouldBe anotherMessage
+            true
+          case _ ⇒ false
         }
 
         user1Listener.fishForMessage(3 seconds, "notification that user1 is sent end message") {
           case ArchiveMessageEnd(_, _, _, _, _) ⇒ true
-          case m => false
+          case m                                ⇒ false
         }
 
       }

@@ -27,10 +27,6 @@ object MAMResponseProvider extends ExtensionElementProvider[MAMResponse] {
 
     parser.nextTag //message
     val message = PacketParserUtils.parseMessage(parser)
-    parser.next //close message
-    parser.next //close forwarded
-    parser.next //close result
-    println("PARSED ARCHIVE")
     val res = MAMResponse(message, origStamp, id, queryId)
     res
   }
