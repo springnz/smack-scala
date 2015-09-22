@@ -444,6 +444,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     def chatHistory = {
       withTwoConnectedUsers{
         user1 ! SendMessage(username2, testMessage)
+        user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
         user1 ! ArchiveMessageRequest(username2)
         user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
@@ -456,8 +457,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         }
 
         user1Listener.fishForMessage(3 seconds, "notification that user1 is sent end message") {
-          case m @ ArchiveMessageEnd ⇒ true
-          case _ => false
+          case ArchiveMessageEnd(_, _, _, _, _) ⇒ true
+          case m => false
         }
 
       }
