@@ -51,7 +51,7 @@ object MAMRequest {
         if (setNodes.length == 0) Map.empty
         else {
           val setNode = setNodes(0)
-          assert(setNode.namespace == PagingNamespace, s""""set" element namespace must have value equal to {MessageArchiveRequest.PagingNamespace} in $xml""")
+          assert(setNode.namespace == PagingNamespace, s""""set" element namespace must have value equal to $PagingNamespace in $xml""")
           fieldInfo ++ (setNode.child map (n ⇒ {
             n.label -> new { val fieldValue: String = n.text }
           })).toMap

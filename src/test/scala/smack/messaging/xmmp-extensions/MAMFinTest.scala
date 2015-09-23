@@ -49,11 +49,6 @@ class MAMFinTest extends WordSpec with Matchers {
         MAMFin.fromXml(notIq).failed.get.getMessage should include("message must have complete set to a boolean")
       }
 
-      "missing set tag" in {
-        val notIq = """<fin xmlns="urn:xmpp:mam:0" complete="true"></fin>"""
-        MAMFin.fromXml(notIq).failed.get.getMessage should include("message must have set tag")
-      }
-
       "missing set xmlns" in {
         val notIq = """<fin xmlns="urn:xmpp:mam:0" complete="true"><set></set></fin>"""
         MAMFin.fromXml(notIq).failed.get.getMessage should include("set tag must be in namespace http://jabber.org/protocol/rsm")

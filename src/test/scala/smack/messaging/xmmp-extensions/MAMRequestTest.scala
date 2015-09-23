@@ -255,7 +255,7 @@ class MAMRequestTest extends WordSpec with Matchers {
                                                        <set>
                                                        </set>
                                                      </query></iq>.toString
-        MAMRequest.fromXml(missingData).failed.get.getMessage should include(s""""set" element namespace must have value equal to {MAMRequest.PagingNamespace}""")
+        MAMRequest.fromXml(missingData).failed.get.getMessage should include(s""""set" element namespace must have value equal to http://jabber.org/protocol/rsm""")
       }
 
       "have incorrect set xmlns" in {
@@ -267,7 +267,7 @@ class MAMRequestTest extends WordSpec with Matchers {
                                                        <set xmlns="bad">
                                                        </set>
                                                      </query></iq>.toString
-        MAMRequest.fromXml(missingData).failed.get.getMessage should include(s""""set" element namespace must have value equal to {MAMRequest.PagingNamespace}""")
+        MAMRequest.fromXml(missingData).failed.get.getMessage should include(s""""set" element namespace must have value equal to http://jabber.org/protocol/rsm""")
       }
 
       "have missing max value" in {
