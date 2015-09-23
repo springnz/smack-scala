@@ -18,7 +18,6 @@ import org.jivesoftware.smack.provider.ExtensionElementProvider
 object MAMResponseProvider extends ExtensionElementProvider[MAMResponse] with NestedExtractionProvider {
   override def parse(parser: XmlPullParser, initialDepth: Int): MAMResponse = {
     val xml = text(parser, initialDepth)
-    println("PARSING " + xml)
     MAMResponse.fromXml(xml).get
   }
 }
