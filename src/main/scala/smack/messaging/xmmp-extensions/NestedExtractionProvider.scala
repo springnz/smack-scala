@@ -14,7 +14,7 @@ import org.xmlpull.v1.XmlPullParser
 //This provider stops at the first end tag of an embedded element
 trait NestedExtractionProvider {
   def text(parser: XmlPullParser, initialDepth: Int): String = {
-    def textRecursive(parser: XmlPullParser, currentDepth: Int, priorTags: List[String]): String = {
+    def textRecursive(priorTags: List[String]): String = {
       if (parser.getEventType == XmlPullParser.END_TAG) {
         val all = priorTags.view map (t ⇒ s"</$t>") mkString ("")
         all
@@ -23,20 +23,22 @@ trait NestedExtractionProvider {
         val name = parser.getName
         val event = parser.next
         val newTags = event match {
-          case XmlPullParser.END_TAG ⇒
+          case XmlPullParser.END_TAG if parser.getDepth != initialDepth ⇒
             parser.nextTag
+            priorTags
+          case XmlPullParser.END_TAG =>
             priorTags
           case XmlPullParser.TEXT ⇒
             name :: priorTags
           case _ ⇒ name :: priorTags
         }
-        thisText + textRecursive(parser, initialDepth, newTags)
+        thisText + textRecursive(newTags)
       } else {
         val thisText = xml.Utility.escape(parser.getText)
         parser.next
-        thisText + textRecursive(parser, initialDepth, priorTags)
+        thisText + textRecursive(priorTags)
       }
     }
-    textRecursive(parser, initialDepth, List.empty)
+    textRecursive(List.empty)
   }
 }
