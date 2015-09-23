@@ -3,6 +3,9 @@ package smack.scala.extensions
 import smack.scala.Client.{ MessageId }
 import org.jivesoftware.smack.packet.{ ExtensionElement }
 
+import scala.util.Try
+import scala.xml.{ NodeSeq, XML }
+
 // implementation of XEP-0313 Message Archive Management, for querying XMMP server for historical messages
 // see http://xmpp.org/extensions/xep-0313.html
 
@@ -20,22 +23,56 @@ object MAMFin extends ExtensionInfoProvider {
 
   val SetNamespace = "http://jabber.org/protocol/rsm"
 
-  //  def fromXml(xml: CharSequence): Try[MessageArchiveResponse] =
-  //    Try {
-  //      val root = XML.loadString(xml.toString)
-  //      val url = root \ "url"
-  //      assert(url.text.length > 0, s"url must be present but was not while trying to parse $xml")
-  //
-  //      val desc = (root \ "desc").text match {
-  //        case ""   ⇒ FileDescription(None)
-  //        case desc ⇒ FileDescription(Some(desc))
-  //      }
-  //
-  //      MessageArchiveResponse(URI.create(url.text), desc)
-  //    }
+  def apply() = new MAMFin()
+
+  def fromXml(xml: CharSequence): Try[MAMFin] =
+    Try {
+      val root = XML.loadString(xml.toString)
+      assert(root.label == "fin", s"message must be type fin in $xml")
+      assert(root.namespace == XmlNamespace, s"message must be in namespace $XmlNamespace in $xml")
+      val complete = root \@ "complete"
+      assert(!complete.isEmpty, s"message must have complete set in $xml")
+      val parsedComplete = Try(complete.toBoolean)
+      assert(parsedComplete.isSuccess, s"message must have complete set to a boolean in $xml")
+
+      val setNodes = root \ "set"
+
+      if (setNodes.size == 0) return Try(MAMFin())
+
+      val setNode = setNodes(0)
+      assert(setNode.namespace == SetNamespace, s"set tag must be in namespace $SetNamespace in $xml")
+
+      val first = setNode \ "first" match {
+        case a: NodeSeq if a.length == 1 ⇒
+          val pindex = Try((a(0) \@ "index").toInt)
+          assert(pindex.isSuccess, s""""first" tag must have index attribute of int in $xml""")
+          assert(!a(0).text.isEmpty, s""""first" tag must have message id text in $xml""")
+          new { val index = Option(pindex.get); val messageId = Option(MessageId(a(0).text)) }
+        case _ ⇒ new { val index = None; val messageId = None }
+      }
+
+      val last = setNode \ "last" match {
+        case a: NodeSeq if a.length == 1 ⇒
+          assert(!a(0).text.isEmpty, s""""last" tag must have message id text in $xml""")
+          Option(MessageId(a(0).text))
+        case _ ⇒ None
+      }
+
+      val count = setNode \ "count" match {
+        case a: NodeSeq if a.length == 1 ⇒
+          val pCount = Try(a(0).text.toInt)
+          assert(pCount.isSuccess, s""""count" tag must have int value in $xml""")
+          Option(pCount.get)
+        case _ ⇒ None
+      }
+
+      MAMFin(first.messageId, last, first.index, count, parsedComplete.get)
+    }
 }
 
-case class MAMFin(firstMessageId: Option[MessageId] = None, lastMessageId: Option[MessageId] = None, index: Option[Int] = None, count: Option[Int] = None, complete: Boolean = true) extends ExtensionElement {
+case class MAMFin(firstMessageId: Option[MessageId], lastMessageId: Option[MessageId], index: Option[Int], count: Option[Int], complete: Boolean = false) extends ExtensionElement {
+  def this() = this(None, None, None, None, true)
+
   import MAMFin._
 
   override def getNamespace: String = XmlNamespace
@@ -46,11 +83,11 @@ case class MAMFin(firstMessageId: Option[MessageId] = None, lastMessageId: Optio
       <set xmlns={ SetNamespace }>
         {
           firstMessageId match {
-            case Some(id)⇒ if (index.isDefined) <first index={ index.get.toString }>{ id }</first>; else <first>{ id }</first>
-            case _  ⇒ ""
+            case Some(MessageId(id))⇒ if (index.isDefined) <first index={ index.get.toString }>{ id }</first>; else <first>{ id }</first>
+            case _             ⇒ ""
           }
         }
-        { lastMessageId match { case Some(id) ⇒ <last>{ id }</last>; case _ ⇒ "" } }
+        { lastMessageId match { case Some(MessageId(id)) ⇒ <last>{ id }</last>; case _ ⇒ "" } }
         { count match { case Some(num) ⇒ <count>{ num }</count>; case _ ⇒ "" } }
       </set>
     </fin>.toString
