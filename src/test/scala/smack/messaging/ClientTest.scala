@@ -448,6 +448,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val anotherMessage = "another Message"
         user1 ! SendMessage(username2, anotherMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
+
+        Thread.sleep(1000) //let messages reach archive
         user1 ! ArchiveMessageRequest(username2)
         user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
           case ArchiveMessageResponse(to, from, msg, origStamp, id, _) ⇒
