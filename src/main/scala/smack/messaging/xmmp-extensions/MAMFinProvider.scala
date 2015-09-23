@@ -12,12 +12,9 @@ import org.xmlpull.v1.XmlPullParser
 //          </set>
 //        </fin>
 
-object MAMFinProvider extends ExtensionElementProvider[MAMFin] {
+object MAMFinProvider extends ExtensionElementProvider[MAMFin] with NestedExtractionProvider {
   override def parse(parser: XmlPullParser, initialDepth: Int): MAMFin = {
-    val complete = Option(parser.getAttributeValue(null, "complete")) //null is for namespace
-    parser.nextTag //set or end
-    parser.getName match {
-      case "fin" ⇒ MAMFin()
-    }
+    val xml = text(parser, initialDepth)
+    MAMFin.fromXml(xml).get
   }
 }

@@ -8,7 +8,6 @@ import org.joda.time.DateTime
 import org.joda.time.format.ISODateTimeFormat
 import org.xmlpull.v1.{ XmlPullParserFactory }
 
-
 import scala.util.{ Failure, Success, Try }
 import scala.xml.XML
 

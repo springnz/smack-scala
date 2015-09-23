@@ -1,6 +1,5 @@
 package smack.scala.extensions
 
-import org.jivesoftware.smack.util.PacketParserUtils
 import org.joda.time.format.{ ISODateTimeFormat }
 import org.xmlpull.v1.XmlPullParser
 import org.jivesoftware.smack.provider.ExtensionElementProvider
@@ -16,18 +15,10 @@ import org.jivesoftware.smack.provider.ExtensionElementProvider
 //          </message>
 //      </forwarded>
 //    </result>
-object MAMResponseProvider extends ExtensionElementProvider[MAMResponse] {
+object MAMResponseProvider extends ExtensionElementProvider[MAMResponse] with NestedExtractionProvider {
   override def parse(parser: XmlPullParser, initialDepth: Int): MAMResponse = {
-    val queryId = Option(parser.getAttributeValue(null, "queryid")) //null is for namespace
-    val id = parser.getAttributeValue(null, "id")
-    parser.nextTag //forwarded
-    parser.nextTag //delay
-    val origStamp = ISODateTimeFormat.dateTimeParser().parseDateTime(parser.getAttributeValue(null, "stamp"))
-    parser.nextTag //end of delay
-
-    parser.nextTag //message
-    val message = PacketParserUtils.parseMessage(parser)
-    val res = MAMResponse(message, origStamp, id, queryId)
-    res
+    val xml = text(parser, initialDepth)
+    println("PARSING " + xml)
+    MAMResponse.fromXml(xml).get
   }
 }
