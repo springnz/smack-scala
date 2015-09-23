@@ -28,6 +28,9 @@ object ChatApp extends App {
     def receive = {
       case MessageDelivered(user, id) ⇒
         computerSays(s"Message ${id.value} acknowledged by ${user.value}")
+      case ArchiveMessageResponse(_, _, msg, stamp, id, _) ⇒
+        computerSays(s"At $stamp message received $msg")
+      case a: ArchiveMessageEnd ⇒ computerSays("Message history ends")
     }
   }
   chattie ! RegisterEventListener(system.actorOf(Props[ReporterActor]))
@@ -63,6 +66,11 @@ object ChatApp extends App {
         computerSays(s"What is the file url, sir?")
         val fileUrl = io.StdIn.readLine
         chattie ! SendUrlMessage(user, URI.create(fileUrl), FileDescription(None))
+
+      case "chatHistory" ⇒
+        computerSays("Who do you want to retrieve a history with, sir?")
+        val user = User(io.StdIn.readLine)
+        chattie ! ArchiveMessageRequest(user)
 
       case "exit" ⇒
         chattie ! Disconnect

@@ -1,7 +1,8 @@
-package smack.scala
+package smack.scala.extensions
 
 import java.net.URI
 
+import smack.scala.FileDescription
 import org.scalatest.{ Matchers, WordSpec }
 import scala.util.Success
 

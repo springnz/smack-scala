@@ -4,19 +4,22 @@ import java.io.{ InputStream, File }
 import java.net.URI
 
 import Client._
-import OutOfBandData._
-import _root_.smack.scala.aws.S3Adapter
+import smack.scala.aws.S3Adapter
+import smack.scala.extensions._
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import java.util.{ UUID, Collection }
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
+import org.jivesoftware.smack.StanzaListener
 import org.jivesoftware.smack.XMPPException.XMPPErrorException
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet._
+import org.jivesoftware.smack.provider.ProviderManager
 import org.jivesoftware.smack.roster.{ Roster, RosterListener }
 import org.jivesoftware.smack.tcp.{ XMPPTCPConnection, XMPPTCPConnectionConfiguration }
 import org.jivesoftware.smackx.iqregister.AccountManager
 import org.jivesoftware.smackx.receipts.{ DeliveryReceiptManager, ReceiptReceivedListener }
+import org.joda.time.DateTime
 import scala.collection.JavaConversions._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{ Failure, Success, Try }
@@ -96,6 +99,8 @@ object Client {
     case class GetUnackMessages(user: User)
     case class GetUnackMessagesResponse(user: User, ids: Seq[MessageState])
 
+    case class ArchiveMessageRequest(user: User, start: Option[DateTime] = None, end: Option[DateTime] = None, limit: Option[Int] = None, skipToMessage: Option[MessageId] = None)
+
     sealed trait ListenerEvent
     case class MessageReceived(chat: Chat, message: Message) extends ListenerEvent
     case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
@@ -103,6 +108,8 @@ object Client {
     case class UserBecameUnavailable(user: User) extends ListenerEvent
     case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
     case class FileUploaded(forUser: User, uri: URI, description: FileDescription) extends ListenerEvent
+    case class ArchiveMessageResponse(to: User, from: User, message: Message, origStamp: DateTime, id: String, queryId: Option[String] = None) extends ListenerEvent
+    case class ArchiveMessageEnd(firstMessageId: Option[MessageId] = None, lastMessageId: Option[MessageId] = None, index: Option[Int] = None, count: Option[Int] = None, complete: Boolean = true) extends ListenerEvent
 
     sealed trait SmackError extends Throwable with ListenerEvent
     case class DuplicateUser(user: User) extends SmackError
@@ -243,6 +250,13 @@ class Client extends FSM[State, Context] {
       sender ! Messages.GetUnackMessagesResponse(user, unack)
       stay
 
+    case Event(Messages.ArchiveMessageRequest(user, start, end, limit, skipTo), Context(Some(connection), _, _)) ⇒
+      val request = MAMRequest(user.getFullyQualifiedUser(defaultDomain), start, end, limit, skipTo)
+      connection.sendIqWithResponseCallback(request, new StanzaListener {
+        override def processPacket(stanza: Stanza): Unit = {}
+      })
+      stay
+
     case Event(Messages.DeleteUser, ctx @ Context(Some(connection), _, _)) ⇒
       log.info(s"trying to delete user")
       val accountManager = AccountManager.getInstance(connection)
@@ -274,6 +288,8 @@ class Client extends FSM[State, Context] {
     setupChatManager(connection)
     setupRosterListener(connection)
     setupDeliveryReceiptManager(connection)
+    setupCustomExtensions(connection)
+
     connection
   }
 
@@ -327,21 +343,37 @@ class Client extends FSM[State, Context] {
     }
   }
 
+  def setupCustomExtensions(connection: XMPPTCPConnection) = {
+    ProviderManager.addExtensionProvider(OutOfBandData.ElementName, OutOfBandData.XmlNamespace, OutOfBandDataProvider)
+    ProviderManager.addExtensionProvider(MAMResponse.ElementName, MAMResponse.XmlNamespace, MAMResponseProvider)
+    ProviderManager.addExtensionProvider(MAMFin.ElementName, MAMFin.XmlNamespace, MAMFinProvider)
+  }
+
+  val extensions = Set[ExtensionInfoProvider](OutOfBandData, MAMResponse, MAMFin)
+  def getExtension(message: Message) = {
+    extensions map (e ⇒ Option(message.getExtension[ExtensionElement](e.ElementName, e.XmlNamespace))) collect { case Some(e) ⇒ e }
+  }
+
   val chatMessageListener = new ChatMessageListener {
     override def processMessage(chat: Chat, message: Message): Unit = {
       // pretty shitty of smack to take a type parameter there... all they do is cast it!
-      val fileExtension = message.getExtension[ExtensionElement](OutOfBandData.ElementName, OutOfBandData.XmlNamespace)
-      if (fileExtension == null) {
-        log.debug(s"ChatMessageListener: received message for $chat : $message")
+      val extensions = getExtension(message)
+      if (extensions.isEmpty) {
+        log.debug(s"ChatMessageListener: received message for $chat : ${message.toXML}")
         self ! Messages.MessageReceived(chat, message)
       } else {
-        OutOfBandData.fromXml(fileExtension.toXML) match {
-          case Success(outOfBandData) ⇒
-            log.debug(s"ChatMessageListener: received file message for $chat : $message")
-            self ! Messages.FileMessageReceived(chat, message, outOfBandData)
-          case Failure(t) ⇒
-            log.error(t, "ChatMessageListener: received file message but was unable to parse the extension into a XEP-0066 format")
-            self ! Messages.MessageReceived(chat, message)
+        extensions foreach {
+          case ob: OutOfBandData ⇒ OutOfBandData.fromXml(ob.toXML) match {
+            case Success(outOfBandData) ⇒
+              log.debug(s"ChatMessageListener: received file message for $chat : $message")
+              self ! Messages.FileMessageReceived(chat, message, outOfBandData)
+            case Failure(t) ⇒
+              log.error(t, "ChatMessageListener: received file message but was unable to parse the extension into a XEP-0066 format")
+              self ! Messages.MessageReceived(chat, message)
+          }
+
+          case MAMResponse(msg, origStamp, id, queryId)                      ⇒ self ! Messages.ArchiveMessageResponse(User(msg.getTo), User(msg.getFrom), msg, origStamp, id, queryId)
+          case MAMFin(firstMessageId, lastMessageId, index, count, complete) ⇒ self ! Messages.ArchiveMessageEnd(firstMessageId, lastMessageId, index, count, complete)
         }
       }
     }
