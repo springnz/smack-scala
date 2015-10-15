@@ -4,13 +4,15 @@ import java.io.{ InputStream, File }
 import java.net.URI
 
 import Client._
+import org.jivesoftware.smackx.muc.{ MultiUserChat, MultiUserChatManager }
+import org.jivesoftware.smackx.xdata.FormField
 import smack.scala.aws.S3Adapter
 import smack.scala.extensions._
 import akka.actor.{ Actor, ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
 import java.util.{ UUID, Collection }
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
-import org.jivesoftware.smack.StanzaListener
+import org.jivesoftware.smack.{ SmackException, StanzaListener }
 import org.jivesoftware.smack.XMPPException.XMPPErrorException
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet._
@@ -23,13 +25,14 @@ import org.joda.time.DateTime
 import scala.collection.JavaConversions._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{ Failure, Success, Try }
-import akka.actor.Status.{ Failure ⇒ ActorFailure }
+import akka.actor.Status.{ Failure ⇒ ActorFailure, Success ⇒ ActorSuccess }
 
 object Client {
 
   object ConfigKeys {
     val domain = "messaging.domain"
     val host = "messaging.host"
+    val service = "messaging.service"
   }
 
   case class User(value: String) extends AnyVal {
@@ -55,6 +58,21 @@ object Client {
   case class Password(value: String) extends AnyVal
   case class Domain(value: String) extends AnyVal
   case class MessageId(value: String) extends AnyVal
+
+  case class ChatRoom(value: String) extends AnyVal
+  case class ChatService(value: String) extends AnyVal
+  case class ChatNickname(value: String) extends AnyVal
+  case class ChatRoomId(room: ChatRoom, service: ChatService) {
+    override def toString = s"${room.value}@${service.value}"
+  }
+  object ChatRoomId {
+    def apply(jid: String): Option[ChatRoomId] = jid.split('@') match {
+      case Array(room, service) ⇒ Some(ChatRoomId(ChatRoom(room), ChatService(service)))
+      case _                    ⇒ None
+    }
+  }
+
+  case class ChatRoomStatus(value: String) extends AnyVal
 
   sealed trait State
   case object Unconnected extends State
@@ -82,6 +100,17 @@ object Client {
     case class RegisterUser(user: User, password: Password)
     object DeleteUser
     case class RegisterEventListener(actor: ActorRef)
+
+    case class CreateChatRoom(room: ChatRoom)
+    case class RegisterChatRoomMembership(room: ChatRoom, user: User)
+    case class RemoveChatRoomMembership(room: ChatRoom, user: User)
+    case class ChatRoomJoin(room: ChatRoom, name: ChatNickname)
+    case class GetChatRoomsResponse(rooms: Set[ChatRoomId])
+    case class DeleteChatRoom(room: ChatRoom, reason: Option[ChatRoomStatus] = None, alternativeRoom: Option[ChatRoom] = None)
+    object GetChatRooms
+    object Created
+    object Destroyed
+    object Joined
 
     case class Connect(user: User, password: Password)
     object Connected
@@ -112,7 +141,10 @@ object Client {
     case class ArchiveMessageEnd(firstMessageId: Option[MessageId] = None, lastMessageId: Option[MessageId] = None, index: Option[Int] = None, count: Option[Int] = None, complete: Boolean = true) extends ListenerEvent
 
     sealed trait SmackError extends Throwable with ListenerEvent
+    object Forbidden extends SmackError
+    case class RoomAlreadyExists(room: ChatRoom) extends SmackError
     case class DuplicateUser(user: User) extends SmackError
+    case class NicknameTaken(nickname: ChatNickname) extends SmackError
     case class InvalidUserName(user: User) extends SmackError
     case class GeneralSmackError(reason: Throwable) extends SmackError
     case class FileUploadError(reason: Throwable) extends SmackError
@@ -124,8 +156,15 @@ class Client extends FSM[State, Context] {
 
   lazy val config = ConfigFactory.load()
   lazy val defaultDomain = Domain(config.getString(ConfigKeys.domain))
+  lazy val chatService = ChatService(config.getString(ConfigKeys.service))
   lazy val host = config.getString(ConfigKeys.host)
   lazy val uploadAdapter: FileUpload = new S3Adapter
+
+  def withChatRoom(room: ChatRoom, connection: XMPPTCPConnection)(block: MultiUserChat ⇒ Unit) = {
+    val id = ChatRoomId(room, chatService)
+    val manager = MultiUserChatManager.getInstanceFor(connection).getMultiUserChat(id.toString)
+    block(manager)
+  }
 
   when(Unconnected) {
     case Event(c: Messages.Connect, ctx) ⇒
@@ -255,6 +294,108 @@ class Client extends FSM[State, Context] {
       connection.sendIqWithResponseCallback(request, new StanzaListener {
         override def processPacket(stanza: Stanza): Unit = {}
       })
+      stay
+
+    case Event(Messages.CreateChatRoom(chatRoom), Context(Some(connection), _, _)) ⇒
+      withChatRoom(chatRoom, connection) { chat ⇒
+        val response: akka.actor.Status.Status = Try {
+          chat.create("admin")
+          val form = chat.getConfigurationForm.createAnswerForm
+          form.setAnswer("muc#roomconfig_membersonly", true)
+          chat.sendConfigurationForm(form)
+        } match {
+          case Failure(t) ⇒
+            log.error(t, s"Failure to create room ${chatRoom.value}");
+            t match {
+              case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.forbidden && ex.getXMPPError.getType == XMPPError.Type.AUTH ⇒ ActorFailure(Messages.Forbidden)
+              case ex: IllegalStateException if ex.getMessage == "Creation failed - User already joined the room." ⇒ ActorFailure(Messages.RoomAlreadyExists(chatRoom))
+              case ex: SmackException if ex.getMessage == "Creation failed - Missing acknowledge of room creation." ⇒ ActorFailure(Messages.RoomAlreadyExists(chatRoom))
+              case _ ⇒ ActorFailure(Messages.GeneralSmackError(t))
+            }
+          case _ ⇒ ActorSuccess(Messages.Created)
+        }
+        sender ! response
+      }
+      stay
+
+    case Event(Messages.RegisterChatRoomMembership(room, jid), Context(Some(connection), _, _)) ⇒
+      withChatRoom(room, connection) { chat ⇒
+        val response: akka.actor.Status.Status = Try {
+          chat.grantMembership(jid.value)
+        } match {
+          case Failure(t) ⇒
+            log.error(t, s"Failure to grant membership");
+            t match {
+              case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.not_allowed && ex.getXMPPError.getType == XMPPError.Type.CANCEL ⇒ ActorFailure(Messages.Forbidden)
+              case _ ⇒ ActorFailure(Messages.GeneralSmackError(t))
+            }
+          case _ ⇒ ActorSuccess(Messages.Joined)
+        }
+        sender ! response
+      }
+      stay
+
+    case Event(Messages.RemoveChatRoomMembership(room, jid), Context(Some(connection), _, _)) ⇒
+      withChatRoom(room, connection) { chat ⇒
+        val response: akka.actor.Status.Status = Try {
+          chat.revokeMembership(jid.value)
+        } match {
+          case Failure(t) ⇒
+            log.error(t, s"Failure to remove membership");
+            t match {
+              case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.not_allowed && ex.getXMPPError.getType == XMPPError.Type.CANCEL ⇒ ActorFailure(Messages.Forbidden)
+              case _ ⇒ ActorFailure(Messages.GeneralSmackError(t))
+            }
+          case _ ⇒ ActorSuccess(Messages.Destroyed)
+        }
+        sender ! response
+      }
+      stay
+
+    case Event(Messages.ChatRoomJoin(room, nickname), Context(Some(connection), _, _)) ⇒
+      withChatRoom(room, connection) { chat ⇒
+        val response: akka.actor.Status.Status = Try {
+          chat.join(nickname.value)
+        } match {
+          case Failure(t) ⇒
+            log.error(t, s"Failure to join room ${room.value}")
+            t match {
+              case ex: XMPPErrorException ⇒
+                if (ex.getXMPPError.getCondition == XMPPError.Condition.registration_required && ex.getXMPPError.getType == XMPPError.Type.AUTH)
+                  ActorFailure(Messages.Forbidden)
+                else if (ex.getXMPPError.getCondition == XMPPError.Condition.conflict && ex.getXMPPError.getType == XMPPError.Type.CANCEL)
+                  ActorFailure(Messages.NicknameTaken(nickname))
+                else ActorFailure(Messages.GeneralSmackError(t))
+              case _ ⇒ ActorFailure(t)
+            }
+          case _ ⇒ ActorSuccess(Messages.Joined)
+        }
+        sender ! response
+      }
+      stay
+
+    case Event(Messages.GetChatRooms, Context(Some(connection), _, _)) ⇒
+      sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getHostedRooms(chatService.value).map(c ⇒ ChatRoomId.apply(c.getJid).get).toSet)
+      stay
+
+    case Event(Messages.DeleteChatRoom(chatRoom, status, altRoom), Context(Some(connection), _, _)) ⇒
+      withChatRoom(chatRoom, connection) { chat ⇒
+        val altRoomId = altRoom map (a ⇒ ChatRoomId(a, chatService).toString)
+        val response: akka.actor.Status.Status = Try {
+          chat.destroy(status.getOrElse(ChatRoomStatus("Destroying room")).value, altRoomId.orNull)
+        } match {
+          case Failure(t) ⇒ t match {
+            case ex: XMPPErrorException ⇒
+              if (ex.getXMPPError.getCondition == XMPPError.Condition.item_not_found && ex.getXMPPError.getType == XMPPError.Type.CANCEL)
+                ActorSuccess(Messages.Destroyed)
+              else ActorFailure(Messages.GeneralSmackError(t))
+
+            case _ ⇒ ActorFailure(t)
+          }
+          case _ ⇒ ActorSuccess(Messages.Destroyed)
+        }
+        sender ! response
+      }
       stay
 
     case Event(Messages.DeleteUser, ctx @ Context(Some(connection), _, _)) ⇒

@@ -45,9 +45,8 @@ object MAMFin extends ExtensionInfoProvider {
       val first = setNode \ "first" match {
         case a: NodeSeq if a.length == 1 ⇒
           val pindex = Try((a(0) \@ "index").toInt)
-          assert(pindex.isSuccess, s""""first" tag must have index attribute of int in $xml""")
           assert(!a(0).text.isEmpty, s""""first" tag must have message id text in $xml""")
-          new { val index = Option(pindex.get); val messageId = Option(MessageId(a(0).text)) }
+          new { val index = pindex.toOption; val messageId = Option(MessageId(a(0).text)) }
         case _ ⇒ new { val index = None; val messageId = None }
       }
 
