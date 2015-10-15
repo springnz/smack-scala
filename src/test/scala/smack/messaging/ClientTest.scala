@@ -17,7 +17,7 @@ import org.scalatest
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
-import scala.concurrent.{ Future, Await }
+import scala.concurrent.{ExecutionContext, Future, Await}
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
 import akka.actor.Status.{ Failure ⇒ ActorFailure }
@@ -179,7 +179,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         fileUploadWithError
       }
 
-      "handles s3 upload" ignore new TestFunctionsWithDomain with UploadS3 {
+      "handles s3 upload" in new TestFunctionsWithDomain with UploadS3 {
         fileUpload
       }
 
@@ -778,7 +778,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   object UploadMock extends FileUpload {
     var files = Map[FileDescription, File]()
-    def upload(file: File, description: FileDescription) = Future {
+    def upload(file: File, description: FileDescription)(implicit ec: ExecutionContext) = Future {
       files = files + (description -> file)
       file.toURI
     }
@@ -786,7 +786,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
   object UploadErrorMock extends FileUpload {
     val uploadErrorMsg = "Upload error"
-    def upload(file: File, description: FileDescription) = Future {
+    def upload(file: File, description: FileDescription)(implicit ec: ExecutionContext) = Future {
       throw new Exception(uploadErrorMsg)
     }
   }

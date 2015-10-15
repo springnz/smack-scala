@@ -23,7 +23,6 @@ import org.jivesoftware.smackx.iqregister.AccountManager
 import org.jivesoftware.smackx.receipts.{ DeliveryReceiptManager, ReceiptReceivedListener }
 import org.joda.time.DateTime
 import scala.collection.JavaConversions._
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{ Failure, Success, Try }
 import akka.actor.Status.{ Failure ⇒ ActorFailure, Success ⇒ ActorSuccess }
 
@@ -248,6 +247,7 @@ class Client extends FSM[State, Context] {
       stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
 
     case Event(Messages.SendFileMessage(recipient, file, description), ctx) ⇒
+      implicit val globalEc = scala.concurrent.ExecutionContext.global
       uploadAdapter.upload(file, description) onComplete {
         case Success(uri) ⇒
           self ! Messages.FileUploaded(User(ctx.connection.get.getUser), uri, description)
