@@ -109,8 +109,32 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         createChatRoom
       }
 
-      "fail on chatroom already exists" in new TestFunctions {
+      "fail on chatroom already exists" in new TestFunctionsWithDomain {
         createMultipleChatRooms
+      }
+
+      "fail on non-member joining room" in new TestFunctionsWithDomain {
+        failNonMember
+      }
+
+      "member joining room" in new TestFunctionsWithDomain {
+        memberJoin
+      }
+
+      "non admin can't accept member" in new TestFunctionsWithDomain {
+        nonAdminMemberFail
+      }
+
+      "can't join with same nickname" in new TestFunctionsWithDomain {
+        sameNickname
+      }
+
+      "admin can remove member" in new TestFunctionsWithDomain {
+        removeMember
+      }
+
+      "non admin can\'t remove member" in new TestFunctionsWithDomain {
+        nonAdminRemoveFail
       }
     }
 
@@ -201,6 +225,22 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "member joining room" in new TestFunctionsWithDomain {
         memberJoin
+      }
+
+      "non admin can't accept member" in new TestFunctionsWithDomain {
+        nonAdminMemberFail
+      }
+
+      "can't join with same nickname" in new TestFunctionsWithDomain {
+        sameNickname
+      }
+
+      "admin can remove member" in new TestFunctionsWithDomain {
+        removeMember
+      }
+
+      "non admin can\'t remove member" in new TestFunctionsWithDomain {
+        nonAdminRemoveFail
       }
     }
   }
@@ -539,6 +579,62 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
+    def nonAdminMemberFail = {
+      withChatRoom {
+        withTwoConnectedUsers {
+          val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+          reg.value.get shouldBe Success(Joined)
+          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          joined.value.get shouldBe Success(Joined)
+          val reg2 = user1 ? RegisterChatRoomMembership(chatRoom, username2)
+          reg2.value.get shouldBe Failure(Forbidden)
+        }
+      }
+    }
+
+    def sameNickname = {
+      withChatRoom {
+        withTwoConnectedUsers {
+          val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+          reg.value.get shouldBe Success(Joined)
+          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          joined.value.get shouldBe Success(Joined)
+          val reg2 = adminUser ? RegisterChatRoomMembership(chatRoom, username2)
+          reg2.value.get shouldBe Success(Joined)
+          val joined2 = user2 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          joined2.value.get shouldBe Failure(NicknameTaken(ChatNickname(username1Nickname)))
+        }
+      }
+    }
+
+    def removeMember = {
+      withChatRoom {
+        withTwoConnectedUsers {
+          val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+          reg.value.get shouldBe Success(Joined)
+          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          joined.value.get shouldBe Success(Joined)
+          val remove = adminUser ? RemoveChatRoomMembership(chatRoom, username1)
+          remove.value.get shouldBe Success(Destroyed)
+          val joined2 = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          joined2.value.get shouldBe Failure(Forbidden)
+        }
+      }
+    }
+
+    def nonAdminRemoveFail = {
+      withChatRoom {
+        withTwoConnectedUsers {
+          val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+          reg.value.get shouldBe Success(Joined)
+          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          joined.value.get shouldBe Success(Joined)
+          val remove = user1 ? RemoveChatRoomMembership(chatRoom, username1)
+          remove.value.get shouldBe Failure(Forbidden)
+        }
+      }
+    }
+
     private def getRoster(u: TestActorRef[Nothing]): Roster = {
       val rosterFuture = (u ? GetRoster).mapTo[GetRosterResponse]
       Await.result(rosterFuture, 3 seconds).roster
@@ -615,7 +711,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
-    def withChatRoom(block: => Unit): Unit = {
+    def withChatRoom(block: ⇒ Unit): Unit = {
       withChatRoomsActivated {
         try {
           val room = adminUser ? CreateChatRoom(chatRoom)
