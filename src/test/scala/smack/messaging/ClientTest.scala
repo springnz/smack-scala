@@ -73,11 +73,11 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         fileUploadWithError
       }
 
-      "handles s3 upload" in new TestFunctions with UploadS3 {
+      "handles s3 upload" ignore new TestFunctions with UploadS3 {
         fileUpload
       }
 
-      "handles s3 upload with error" in new TestFunctions with UploadS3 {
+      "handles s3 upload with error" ignore new TestFunctions with UploadS3 {
         fileUploadWithError
       }
 
@@ -175,11 +175,11 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         fileUploadWithError
       }
 
-      "handles s3 upload" in new TestFunctionsWithDomain with UploadS3 {
+      "handles s3 upload" ignore new TestFunctionsWithDomain with UploadS3 {
         fileUpload
       }
 
-      "handles s3 upload with error" in new TestFunctionsWithDomain with UploadS3 {
+      "handles s3 upload with error" ignore new TestFunctionsWithDomain with UploadS3 {
         fileUploadWithError
       }
 
