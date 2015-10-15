@@ -307,6 +307,7 @@ class Client extends FSM[State, Context] {
           case Failure(t) ⇒
             log.error(t, s"Failure to create room ${chatRoom.value}");
             t match {
+              case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.forbidden && ex.getXMPPError.getType == XMPPError.Type.AUTH ⇒ ActorFailure(Messages.Forbidden)
               case ex: IllegalStateException if ex.getMessage == "Creation failed - User already joined the room." ⇒ ActorFailure(Messages.RoomAlreadyExists(chatRoom))
               case ex: SmackException if ex.getMessage == "Creation failed - Missing acknowledge of room creation." ⇒ ActorFailure(Messages.RoomAlreadyExists(chatRoom))
               case _ ⇒ ActorFailure(Messages.GeneralSmackError(t))

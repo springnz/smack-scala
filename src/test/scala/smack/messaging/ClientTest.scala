@@ -109,6 +109,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         createChatRoom
       }
 
+      "non-admin can't create room" in new TestFunctions {
+        createNonAdminFail
+      }
+
       "fail on chatroom already exists" in new TestFunctionsWithDomain {
         createMultipleChatRooms
       }
@@ -547,6 +551,15 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         room.value.get shouldBe Success(Created)
         val rooms = adminUser ? GetChatRooms
         assert(rooms.value.get.get.asInstanceOf[GetChatRoomsResponse].rooms.contains(fullChatRoom))
+      }
+    }
+
+    def createNonAdminFail = {
+      withChatRoomsActivated {
+        withTwoConnectedUsers {
+          val room = user1 ? CreateChatRoom(chatRoom)
+          room.value.get shouldBe Failure(Forbidden)
+        }
       }
     }
 
