@@ -59,16 +59,6 @@ class MAMFinTest extends WordSpec with Matchers {
         MAMFin.fromXml(notIq).failed.get.getMessage should include("set tag must be in namespace http://jabber.org/protocol/rsm")
       }
 
-      "bad first tag" in {
-        val notIq =
-          <fin xmlns="urn:xmpp:mam:0" complete="true">
-            <set xmlns="http://jabber.org/protocol/rsm">
-              <first></first>
-            </set>
-          </fin>.toString()
-        MAMFin.fromXml(notIq).failed.get.getMessage should include(""""first" tag must have index attribute of int""")
-      }
-
       "empty first id" in {
         val notIq =
           <fin xmlns="urn:xmpp:mam:0" complete="true">
