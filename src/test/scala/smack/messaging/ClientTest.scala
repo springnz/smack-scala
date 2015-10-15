@@ -550,7 +550,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val room = adminUser ? CreateChatRoom(chatRoom)
         room.value.get shouldBe Success(Created)
         val rooms = adminUser ? GetChatRooms
-        assert(rooms.value.get.get.asInstanceOf[GetChatRoomsResponse].rooms.contains(fullChatRoom))
+        assert(rooms.mapTo[GetChatRoomsResponse].value.get.get.rooms.contains(fullChatRoom))
       }
     }
 
