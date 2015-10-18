@@ -266,7 +266,9 @@ class Client extends FSM[State, Context] {
         if (username.value == defaultDomain.value) throw new Messages.InvalidUserName(register.user)
         accountManager.createAccount(username.value, register.password.value)
       } match {
-        case Success(s) ⇒ log.info(s"${register.user} successfully created")
+        case Success(s) ⇒
+          log.info(s"${register.user} successfully created")
+          sender ! Messages.Created
         case Failure(t) ⇒
           log.error(t, s"could not register ${register.user}!")
           val response: ActorFailure = t match {
