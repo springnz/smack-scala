@@ -107,6 +107,7 @@ object Client {
     case class GetChatRoomsResponse(rooms: Set[ChatRoomId])
     case class DeleteChatRoom(room: ChatRoom, reason: Option[ChatRoomStatus] = None, alternativeRoom: Option[ChatRoom] = None)
     object GetChatRooms
+    object GetJoinedRooms
     object Created
     object Destroyed
     object Joined
@@ -158,6 +159,7 @@ class Client extends FSM[State, Context] {
   lazy val chatService = ChatService(config.getString(ConfigKeys.service))
   lazy val host = config.getString(ConfigKeys.host)
   lazy val uploadAdapter: FileUpload = new S3Adapter
+  lazy val adminUsername = config.getString("messaging.admin.username")
 
   def withChatRoom(room: ChatRoom, connection: XMPPTCPConnection)(block: MultiUserChat ⇒ Unit) = {
     val id = ChatRoomId(room, chatService)
@@ -264,9 +266,12 @@ class Client extends FSM[State, Context] {
       Try {
         val (username, _) = register.user.splitUserIntoNameAndDomain(defaultDomain)
         if (username.value == defaultDomain.value) throw new Messages.InvalidUserName(register.user)
+        if (username.value == adminUsername) throw new Messages.DuplicateUser(register.user)
         accountManager.createAccount(username.value, register.password.value)
       } match {
-        case Success(s) ⇒ log.info(s"${register.user} successfully created")
+        case Success(s) ⇒
+          log.info(s"${register.user} successfully created")
+          sender ! Messages.Created
         case Failure(t) ⇒
           log.error(t, s"could not register ${register.user}!")
           val response: ActorFailure = t match {
@@ -319,9 +324,11 @@ class Client extends FSM[State, Context] {
       stay
 
     case Event(Messages.RegisterChatRoomMembership(room, jid), Context(Some(connection), _, _)) ⇒
+      val (user, domain) = jid.splitUserIntoNameAndDomain(defaultDomain)
+      val fullUser = user getFullyQualifiedUser domain
       withChatRoom(room, connection) { chat ⇒
         val response: akka.actor.Status.Status = Try {
-          chat.grantMembership(jid.value)
+          chat.grantMembership(fullUser.value)
         } match {
           case Failure(t) ⇒
             log.error(t, s"Failure to grant membership");
@@ -336,9 +343,11 @@ class Client extends FSM[State, Context] {
       stay
 
     case Event(Messages.RemoveChatRoomMembership(room, jid), Context(Some(connection), _, _)) ⇒
+      val (user, domain) = jid.splitUserIntoNameAndDomain(defaultDomain)
+      val fullUser = user getFullyQualifiedUser domain
       withChatRoom(room, connection) { chat ⇒
         val response: akka.actor.Status.Status = Try {
-          chat.revokeMembership(jid.value)
+          chat.revokeMembership(fullUser.value)
         } match {
           case Failure(t) ⇒
             log.error(t, s"Failure to remove membership");
@@ -376,6 +385,10 @@ class Client extends FSM[State, Context] {
 
     case Event(Messages.GetChatRooms, Context(Some(connection), _, _)) ⇒
       sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getHostedRooms(chatService.value).map(c ⇒ ChatRoomId.apply(c.getJid).get).toSet)
+      stay
+
+    case Event(Messages.GetJoinedRooms, Context(Some(connection), _, _)) ⇒
+      sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getJoinedRooms().map(c ⇒ ChatRoomId.apply(c).get).toSet)
       stay
 
     case Event(Messages.DeleteChatRoom(chatRoom, status, altRoom), Context(Some(connection), _, _)) ⇒

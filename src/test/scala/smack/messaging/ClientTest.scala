@@ -53,6 +53,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         invalidRegistration
       }
 
+      "should reject registration with username same as admin" in new TestFunctions {
+        invalidAdminRegistration
+      }
+
       "enables users to chat to each other" in new TestFunctions {
         chat
       }
@@ -113,32 +117,36 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         createNonAdminFail
       }
 
-      "fail on chatroom already exists" in new TestFunctionsWithDomain {
+      "fail on chatroom already exists" in new TestFunctions {
         createMultipleChatRooms
       }
 
-      "fail on non-member joining room" in new TestFunctionsWithDomain {
+      "fail on non-member joining room" in new TestFunctions {
         failNonMember
       }
 
-      "member joining room" in new TestFunctionsWithDomain {
+      "member joining room" in new TestFunctions {
         memberJoin
       }
 
-      "non admin can't accept member" in new TestFunctionsWithDomain {
+      "non admin can't accept member" in new TestFunctions {
         nonAdminMemberFail
       }
 
-      "can't join with same nickname" in new TestFunctionsWithDomain {
+      "can't join with same nickname" in new TestFunctions {
         sameNickname
       }
 
-      "admin can remove member" in new TestFunctionsWithDomain {
+      "admin can remove member" in new TestFunctions {
         removeMember
       }
 
-      "non admin can\'t remove member" in new TestFunctionsWithDomain {
+      "non admin can\'t remove member" in new TestFunctions {
         nonAdminRemoveFail
+      }
+
+      "member should get joined rooms" in new TestFunctions {
+        getMemberJoinedRooms
       }
     }
 
@@ -246,6 +254,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       "non admin can\'t remove member" in new TestFunctionsWithDomain {
         nonAdminRemoveFail
       }
+
+      "member should get joined rooms" in new TestFunctionsWithDomain {
+        getMemberJoinedRooms
+      }
     }
   }
 
@@ -261,7 +273,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       val userPass = Password(username.value)
 
       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
-      adminUser ! RegisterUser(username, userPass)
+      val registered = adminUser ? RegisterUser(username, userPass)
+      registered.value.get shouldBe Success(Messages.Created)
 
       val connected1 = user1 ? Connect(username, userPass)
       connected1.value.get shouldBe Success(Messages.Connected)
@@ -290,6 +303,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
       val registration = adminUser ? RegisterUser(username, userPass)
       registration.value.get shouldBe Failure(InvalidUserName(username))
+    }
+
+    def invalidAdminRegistration: Unit = {
+      val username = User(adminUsername)
+      val pass = Password("newspring")
+      val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+      val registration = adminUser ? RegisterUser(username, pass)
+      registration.value.get shouldBe Failure(DuplicateUser(username))
     }
 
     def chat: Unit = {
@@ -573,7 +594,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def failNonMember = {
-      withChatRoom {
+      withChatRoom() {
         withTwoConnectedUsers {
           val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
           joined.value.get shouldBe Failure(Forbidden)
@@ -582,7 +603,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def memberJoin = {
-      withChatRoom {
+      withChatRoom() {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
@@ -592,8 +613,23 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
+    def getMemberJoinedRooms = {
+      val room2 = ChatRoom("chat2")
+      withChatRoom(Set(chatRoom, room2)) {
+        withTwoConnectedUsers {
+          val reg = adminUser ? RegisterChatRoomMembership(room2, username1)
+          reg.value.get shouldBe Success(Joined)
+          val joined = user1 ? ChatRoomJoin(room2, ChatNickname(username1Nickname))
+          joined.value.get shouldBe Success(Joined)
+
+          val rooms = user1 ? GetJoinedRooms
+          rooms.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(ChatRoom("chat2"), chatService))
+        }
+      }
+    }
+
     def nonAdminMemberFail = {
-      withChatRoom {
+      withChatRoom() {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
@@ -606,7 +642,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def sameNickname = {
-      withChatRoom {
+      withChatRoom() {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
@@ -621,7 +657,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def removeMember = {
-      withChatRoom {
+      withChatRoom() {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
@@ -636,7 +672,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def nonAdminRemoveFail = {
-      withChatRoom {
+      withChatRoom() {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
@@ -724,14 +760,19 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
-    def withChatRoom(block: ⇒ Unit): Unit = {
+    def withChatRoom(toJoin: Set[ChatRoom] = Set(chatRoom)) (block: ⇒ Unit): Unit = {
       withChatRoomsActivated {
         try {
-          val room = adminUser ? CreateChatRoom(chatRoom)
-          room.value.get shouldBe Success(Created)
+          toJoin foreach {r =>
+            val room = adminUser ? CreateChatRoom(r)
+            room.value.get shouldBe Success(Created)
+          }
+
           block
         } finally {
-          adminUser ? DeleteChatRoom(chatRoom)
+          toJoin foreach { r =>
+            adminUser ? DeleteChatRoom(r)
+          }
         }
       }
     }
