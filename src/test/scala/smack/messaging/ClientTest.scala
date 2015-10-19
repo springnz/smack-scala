@@ -390,7 +390,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val fileDescription = FileDescription(Some("file description"))
         user1 ! SendUrlMessage(username2, fileUrl, fileDescription)
 
-        user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
+        user2Listener.expectMsgPF(timeout.duration, "xep-0066 file transfer") {
           case FileMessageReceived(chat, message, outOfBandData) ⇒
             chat.getParticipant should startWith(username1.value)
             message.getTo should startWith(username2.value)
@@ -419,7 +419,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case _ ⇒ false
         }
 
-        user2Listener.fishForMessage(3 seconds, "file transfer") {
+        user2Listener.fishForMessage(timeout.duration, "file transfer") {
           case FileMessageReceived(chat, message, outOfBandData) ⇒
             chat.getParticipant should startWith(username1.value)
             message.getTo should startWith(username2.value)
@@ -437,7 +437,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val fileDescription = Some("file description")
         user1 ! SendFileMessage(username2, file, FileDescription(fileDescription))
 
-        user1Listener.fishForMessage(3 seconds, "file upload error") {
+        user1Listener.fishForMessage(timeout.duration, "file upload error") {
           case ActorFailure(FileUploadError(ex)) ⇒
             true
           case _ ⇒ false
@@ -449,7 +449,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       withTwoConnectedUsers {
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
-        user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 came online") {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
             true
@@ -457,7 +457,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         }
 
         user2 ! Disconnect
-        user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 went offline") {
           case UserBecameUnavailable(user) ⇒
             user.value should startWith(username2.value)
             true
@@ -465,7 +465,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         }
 
         user2 ! Connect(username2, user2Pass)
-        user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 came online") {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
             true
@@ -506,10 +506,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user2 ! RegisterEventListener(user2Listener.ref)
 
         val user1MessageIdFuture = (user1 ? SendMessage(username2, testMessage)).mapTo[MessageId]
-        val user1MessageId = Await.result(user1MessageIdFuture, 3 seconds)
+        val user1MessageId = Await.result(user1MessageIdFuture, timeout.duration)
 
         val unackedMessageFuture = (user1 ? GetUnackMessages(username2)).mapTo[GetUnackMessagesResponse]
-        Await.result(unackedMessageFuture, 3 seconds) match {
+        Await.result(unackedMessageFuture, timeout.duration) match {
           case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
             ids.size shouldBe 1
@@ -523,7 +523,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
         verifyMessageDelivery(user1Listener, username1, username2, user1MessageIdFuture)
         val emptyUnacked = (user1 ? GetUnackMessages(username2)).mapTo[GetUnackMessagesResponse]
-        Await.result(emptyUnacked, 3 seconds) match {
+        Await.result(emptyUnacked, timeout.duration) match {
           case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
             ids.isEmpty shouldBe true
@@ -536,7 +536,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-        user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 is in roster") {
           case UserBecameAvailable(user) ⇒
             val roster = getRoster(user1)
             roster.getEntries should have size 1
@@ -548,7 +548,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         }
 
         user2 ! Disconnect
-        user1Listener.fishForMessage(3 seconds, "notification that user2 is not in roster") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 is not in roster") {
           case UserBecameUnavailable(user) ⇒
             val roster = getRoster(user1)
             roster.getEntries should have size 1
@@ -566,7 +566,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-        user2Listener.fishForMessage(3 seconds, "notification that user1 is in roster") {
+        user2Listener.fishForMessage(timeout.duration, "notification that user1 is in roster") {
           case UserBecameAvailable(user) ⇒
             val roster = getRoster(user2)
             roster.getEntries should have size 1
@@ -589,7 +589,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         Thread.sleep(1000) //let messages reach archive
         user1 ! ArchiveMessageRequest(username2)
-        user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user1 sent a message to user2") {
           case ArchiveMessageResponse(to, from, msg, origStamp, id, _) ⇒
             to.value shouldBe username2.getFullyQualifiedUser(domain).value
             from.value shouldBe username1.getFullyQualifiedUser(domain).value + "/Smack"
@@ -598,7 +598,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case _ ⇒ false
         }
 
-        user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user1 sent a message to user2") {
           case ArchiveMessageResponse(to, from, msg, origStamp, id, _) ⇒
             to.value shouldBe username2.getFullyQualifiedUser(domain).value
             from.value shouldBe username1.getFullyQualifiedUser(domain).value + "/Smack"
@@ -607,7 +607,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case _ ⇒ false
         }
 
-        user1Listener.fishForMessage(3 seconds, "notification that user1 is sent end message") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user1 is sent end message") {
           case ArchiveMessageEnd(_, _, _, _, _) ⇒ true
           case m                                ⇒ false
         }
@@ -759,7 +759,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     private def getRoster(u: TestActorRef[Nothing]): Roster = {
       val rosterFuture = (u ? GetRoster).mapTo[GetRosterResponse]
-      Await.result(rosterFuture, 3 seconds).roster
+      Await.result(rosterFuture, timeout.duration).roster
     }
   }
 
@@ -851,7 +851,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def verifyMessageArrived(testProbe: TestProbe, sender: User, recipient: User, messageBody: String): Unit = {
-      testProbe.fishForMessage(3 seconds, "expected message to be delivered") {
+      testProbe.fishForMessage(timeout.duration, "expected message to be delivered") {
         case MessageReceived(chat, message) ⇒
           chat.getParticipant should startWith(sender.value)
           message.getTo should startWith(recipient.value)
@@ -862,9 +862,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def verifyMessageDelivery(testProbe: TestProbe, sender: User, recipient: User, messageIdFuture: Future[Any]): Unit = {
-      testProbe.fishForMessage(3 seconds, "notification that message has been delivered") {
+      testProbe.fishForMessage(timeout.duration, "notification that message has been delivered") {
         case MessageDelivered(to, msgId) ⇒
-          Await.result(messageIdFuture, 3 seconds) match {
+          Await.result(messageIdFuture, timeout.duration) match {
             case MessageId(messageId) ⇒
               to.value should startWith(recipient.value)
               msgId.value should equal(messageId)
