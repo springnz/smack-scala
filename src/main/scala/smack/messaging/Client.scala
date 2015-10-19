@@ -158,6 +158,7 @@ class Client extends FSM[State, Context] {
   lazy val chatService = ChatService(config.getString(ConfigKeys.service))
   lazy val host = config.getString(ConfigKeys.host)
   lazy val uploadAdapter: FileUpload = new S3Adapter
+  lazy val adminUsername = config.getString("messaging.admin.username")
 
   def withChatRoom(room: ChatRoom, connection: XMPPTCPConnection)(block: MultiUserChat ⇒ Unit) = {
     val id = ChatRoomId(room, chatService)
@@ -264,6 +265,7 @@ class Client extends FSM[State, Context] {
       Try {
         val (username, _) = register.user.splitUserIntoNameAndDomain(defaultDomain)
         if (username.value == defaultDomain.value) throw new Messages.InvalidUserName(register.user)
+        if (username.value == adminUsername) throw new Messages.DuplicateUser(register.user)
         accountManager.createAccount(username.value, register.password.value)
       } match {
         case Success(s) ⇒

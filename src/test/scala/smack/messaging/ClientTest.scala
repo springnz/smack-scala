@@ -53,6 +53,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         invalidRegistration
       }
 
+      "should reject registration with username same as admin" in new TestFunctions {
+        invalidAdminRegistration
+      }
+
       "enables users to chat to each other" in new TestFunctions {
         chat
       }
@@ -261,7 +265,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       val userPass = Password(username.value)
 
       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
-      adminUser ! RegisterUser(username, userPass)
+      val registered = adminUser ? RegisterUser(username, userPass)
+      registered.value.get shouldBe Success(Messages.Created)
 
       val connected1 = user1 ? Connect(username, userPass)
       connected1.value.get shouldBe Success(Messages.Connected)
@@ -290,6 +295,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
       val registration = adminUser ? RegisterUser(username, userPass)
       registration.value.get shouldBe Failure(InvalidUserName(username))
+    }
+
+    def invalidAdminRegistration: Unit = {
+      val username = User(adminUsername)
+      val pass = Password("newspring")
+      val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
+      val registration = adminUser ? RegisterUser(username, pass)
+      registration.value.get shouldBe Failure(DuplicateUser(username))
     }
 
     def chat: Unit = {
