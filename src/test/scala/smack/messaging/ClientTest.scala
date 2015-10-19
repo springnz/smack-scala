@@ -17,7 +17,7 @@ import org.scalatest
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
-import scala.concurrent.{ExecutionContext, Future, Await}
+import scala.concurrent.{ ExecutionContext, Future, Await }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
 import akka.actor.Status.{ Failure ⇒ ActorFailure }
@@ -144,10 +144,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       "non admin can\'t remove member" in new TestFunctions {
         nonAdminRemoveFail
       }
-
-      "member should get joined rooms" in new TestFunctions {
-        getMemberJoinedRooms
-      }
     }
 
     "usernames have domains " should {
@@ -253,10 +249,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "non admin can\'t remove member" in new TestFunctionsWithDomain {
         nonAdminRemoveFail
-      }
-
-      "member should get joined rooms" in new TestFunctionsWithDomain {
-        getMemberJoinedRooms
       }
 
       "member should get membership without joining" in new TestFunctionsWithDomain {
@@ -617,30 +609,15 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
-    def getMemberJoinedRooms = {
-      val room2 = ChatRoom("chat2")
-      withChatRoom(Set(chatRoom, room2)) {
-        withTwoConnectedUsers {
-          val reg = adminUser ? RegisterChatRoomMembership(room2, username1)
-          reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(room2, username1Nickname)
-          joined.value.get shouldBe Success(Joined)
-
-          val rooms = user1 ? GetJoinedRooms
-          rooms.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(ChatRoom("chat2"), chatService))
-        }
-      }
-    }
-
     def getMembership = {
       withChatRoom() {
         val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
         reg.value.get shouldBe Success(Joined)
         withTwoConnectedUsers {
           val joined = user1 ? GetJoinedRooms
-          joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set()
+          joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(chatRoom, chatService))
           val member = user1 ? GetRoomMembers(chatRoom)
-          member.mapTo[GetRoomMembersResponse].value.get.get.members shouldBe Set(MemberInfo(username1.getFullyQualifiedUser(Domain(domain)), chatRoom ))
+          member.mapTo[GetRoomMembersResponse].value.get.get.members shouldBe Set(MemberInfo(username1.getFullyQualifiedUser(Domain(domain)), chatRoom))
         }
       }
     }
@@ -777,17 +754,17 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
-    def withChatRoom(toJoin: Set[ChatRoom] = Set(chatRoom)) (block: ⇒ Unit): Unit = {
+    def withChatRoom(toJoin: Set[ChatRoom] = Set(chatRoom))(block: ⇒ Unit): Unit = {
       withChatRoomsActivated {
         try {
-          toJoin foreach {r =>
+          toJoin foreach { r ⇒
             val room = adminUser ? CreateChatRoom(r)
             room.value.get shouldBe Success(Created)
           }
 
           block
         } finally {
-          toJoin foreach { r =>
+          toJoin foreach { r ⇒
             adminUser ? DeleteChatRoom(r)
           }
         }

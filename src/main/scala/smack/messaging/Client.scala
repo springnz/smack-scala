@@ -42,7 +42,7 @@ object Client {
 
     def getFullyQualifiedUser(defaultDomain: Domain): UserWithDomain = {
       val (user, domain) = splitUserIntoNameAndDomain(defaultDomain)
-      return user getFullyQualifiedUser domain
+      user getFullyQualifiedUser domain
     }
   }
 
@@ -108,12 +108,11 @@ object Client {
     case class GetChatRoomsResponse(rooms: Set[ChatRoomId])
     case class DeleteChatRoom(room: ChatRoom, reason: Option[ChatRoomStatus] = None, alternativeRoom: Option[ChatRoom] = None)
 
-
     case class GetRoomMembers(room: ChatRoom)
     case class GetRoomMembersResponse(members: Set[MemberInfo])
 
-    object GetChatRooms
     object GetJoinedRooms
+    object GetChatRooms
     object Created
     object Destroyed
     object Joined
@@ -394,12 +393,18 @@ class Client extends FSM[State, Context] {
       stay
 
     case Event(Messages.GetJoinedRooms, Context(Some(connection), _, _)) ⇒
-      sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getJoinedRooms.map(c ⇒ ChatRoomId.apply(c).get).toSet)
+
+      val manager = MultiUserChatManager.getInstanceFor(connection)
+      val rooms = manager.getHostedRooms(chatService.value) filter { c ⇒
+        val member = User(connection.getUser).getFullyQualifiedUser(defaultDomain)
+        manager.getMultiUserChat(c.getJid).getMembers exists (m ⇒ m.getJid == member.value)
+      } map (c ⇒ ChatRoomId(c.getJid).get)
+      sender ! Messages.GetChatRoomsResponse(rooms.toSet)
       stay
 
     case Event(Messages.GetRoomMembers(room), Context(Some(connection), _, _)) ⇒
-      withChatRoom(room, connection) { chat =>
-        sender ! Messages.GetRoomMembersResponse((chat.getMembers map ( m => MemberInfo(UserWithDomain(m.getJid), room))).toSet)
+      withChatRoom(room, connection) { chat ⇒
+        sender ! Messages.GetRoomMembersResponse((chat.getMembers map (m ⇒ MemberInfo(UserWithDomain(m.getJid), room))).toSet)
       }
       stay
 
