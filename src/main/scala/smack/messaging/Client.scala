@@ -372,15 +372,22 @@ class Client extends FSM[State, Context] {
           chat.join(nickname.value)
         } match {
           case Failure(t) ⇒
-            log.error(t, s"Failure to join room ${room.value}")
             t match {
               case ex: XMPPErrorException ⇒
-                if (ex.getXMPPError.getCondition == XMPPError.Condition.registration_required && ex.getXMPPError.getType == XMPPError.Type.AUTH)
+                if (ex.getXMPPError.getCondition == XMPPError.Condition.registration_required && ex.getXMPPError.getType == XMPPError.Type.AUTH) {
+                  log.warning(s"${nickname.value} failure to join room ${room.value} because not registered")
                   ActorFailure(Messages.Forbidden)
-                else if (ex.getXMPPError.getCondition == XMPPError.Condition.conflict && ex.getXMPPError.getType == XMPPError.Type.CANCEL)
+                } else if (ex.getXMPPError.getCondition == XMPPError.Condition.conflict && ex.getXMPPError.getType == XMPPError.Type.CANCEL) {
+                  log.warning(s"${nickname.value} failure to join room ${room.value} because nickname already taken")
                   ActorFailure(Messages.NicknameTaken(nickname))
-                else ActorFailure(Messages.GeneralSmackError(t))
-              case _ ⇒ ActorFailure(t)
+                } else {
+                  log.error(t, s"Error joining room ${room.value}")
+                  ActorFailure(Messages.GeneralSmackError(t))
+                }
+              case _ ⇒ {
+                log.error(t, s"Error joining room ${room.value}")
+                ActorFailure(t)
+              }
             }
           case _ ⇒ ActorSuccess(Messages.Joined)
         }
@@ -393,19 +400,40 @@ class Client extends FSM[State, Context] {
       stay
 
     case Event(Messages.GetJoinedRooms, Context(Some(connection), _, _)) ⇒
-
       val manager = MultiUserChatManager.getInstanceFor(connection)
       val rooms = manager.getHostedRooms(chatService.value) filter { c ⇒
         val member = User(connection.getUser).getFullyQualifiedUser(defaultDomain)
-        manager.getMultiUserChat(c.getJid).getMembers exists (m ⇒ m.getJid == member.value)
+        Try {
+          //there doesn't appear to be any way to know whether a user is a member if not logged in
+          //and xmpp throws a forbidden exception if the user isn't a member of a room and asks for the roster
+          //so this hack appears to be the only way to get all of the rooms where a user is member regardless of joined status
+          manager.getMultiUserChat(c.getJid).getMembers exists (m ⇒ m.getJid == member.value)
+        } match {
+          case Failure(t) ⇒ false
+          case _          ⇒ true
+        }
+
       } map (c ⇒ ChatRoomId(c.getJid).get)
       sender ! Messages.GetChatRoomsResponse(rooms.toSet)
       stay
 
     case Event(Messages.GetRoomMembers(room), Context(Some(connection), _, _)) ⇒
       withChatRoom(room, connection) { chat ⇒
-        sender ! Messages.GetRoomMembersResponse((chat.getMembers map (m ⇒ MemberInfo(UserWithDomain(m.getJid), room))).toSet)
+        val response: akka.actor.Status.Status = Try {
+          sender ! Messages.GetRoomMembersResponse((chat.getMembers map (m ⇒ MemberInfo(UserWithDomain(m.getJid), room))).toSet)
+        } match {
+          case Failure(t) ⇒ t match {
+            case ex: XMPPErrorException ⇒
+              if (ex.getXMPPError.getCondition == XMPPError.Condition.forbidden && ex.getXMPPError.getType == XMPPError.Type.AUTH)
+                ActorFailure(Messages.Forbidden)
+              else ActorFailure(Messages.GeneralSmackError(t))
+            case _ ⇒ ActorFailure(t)
+          }
+          case Success(members) ⇒ ActorSuccess(members)
+        }
+        sender ! response
       }
+
       stay
 
     case Event(Messages.DeleteChatRoom(chatRoom, status, altRoom), Context(Some(connection), _, _)) ⇒

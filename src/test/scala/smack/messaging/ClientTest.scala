@@ -254,6 +254,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       "member should get membership without joining" in new TestFunctionsWithDomain {
         getMembership
       }
+
+      "member should get membership without joining - multiple rooms test" in new TestFunctionsWithDomain {
+        getMembershipMultipleRooms
+      }
+
+      "member should be forbidden to get membership if not part of group" in new TestFunctionsWithDomain {
+        forbiddenMembership
+      }
     }
   }
 
@@ -618,6 +626,33 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(chatRoom, chatService))
           val member = user1 ? GetRoomMembers(chatRoom)
           member.mapTo[GetRoomMembersResponse].value.get.get.members shouldBe Set(MemberInfo(username1.getFullyQualifiedUser(Domain(domain)), chatRoom))
+        }
+      }
+    }
+
+    def getMembershipMultipleRooms = {
+      val chat2 = ChatRoom("chat2")
+      withChatRoom(Set(chatRoom, chat2)) {
+        val reg = adminUser ? RegisterChatRoomMembership(chat2, username1)
+        reg.value.get shouldBe Success(Joined)
+        withTwoConnectedUsers {
+          val joined = user1 ? GetJoinedRooms
+          joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(chat2, chatService))
+          val member = user1 ? GetRoomMembers(chat2)
+          member.mapTo[GetRoomMembersResponse].value.get.get.members shouldBe Set(MemberInfo(username1.getFullyQualifiedUser(Domain(domain)), chat2))
+        }
+      }
+    }
+
+    def forbiddenMembership = {
+      withChatRoom() {
+        val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+        reg.value.get shouldBe Success(Joined)
+        withTwoConnectedUsers {
+          val joined = user2 ? GetJoinedRooms
+          joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set()
+          val member = user2 ? GetRoomMembers(chatRoom)
+          member.value.get shouldBe Failure(Forbidden)
         }
       }
     }
