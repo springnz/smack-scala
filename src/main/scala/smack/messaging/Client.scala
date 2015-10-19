@@ -58,6 +58,7 @@ object Client {
   case class Domain(value: String) extends AnyVal
   case class MessageId(value: String) extends AnyVal
 
+  case class MemberInfo(user: UserWithDomain, room: ChatRoom)
   case class ChatRoom(value: String) extends AnyVal
   case class ChatService(value: String) extends AnyVal
   case class ChatNickname(value: String) extends AnyVal
@@ -106,6 +107,11 @@ object Client {
     case class ChatRoomJoin(room: ChatRoom, name: ChatNickname)
     case class GetChatRoomsResponse(rooms: Set[ChatRoomId])
     case class DeleteChatRoom(room: ChatRoom, reason: Option[ChatRoomStatus] = None, alternativeRoom: Option[ChatRoom] = None)
+
+
+    case class GetRoomMembers(room: ChatRoom)
+    case class GetRoomMembersResponse(members: Set[MemberInfo])
+
     object GetChatRooms
     object GetJoinedRooms
     object Created
@@ -388,7 +394,13 @@ class Client extends FSM[State, Context] {
       stay
 
     case Event(Messages.GetJoinedRooms, Context(Some(connection), _, _)) ⇒
-      sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getJoinedRooms().map(c ⇒ ChatRoomId.apply(c).get).toSet)
+      sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getJoinedRooms.map(c ⇒ ChatRoomId.apply(c).get).toSet)
+      stay
+
+    case Event(Messages.GetRoomMembers(room), Context(Some(connection), _, _)) ⇒
+      withChatRoom(room, connection) { chat =>
+        sender ! Messages.GetRoomMembersResponse((chat.getMembers map ( m => MemberInfo(UserWithDomain(m.getJid), room))).toSet)
+      }
       stay
 
     case Event(Messages.DeleteChatRoom(chatRoom, status, altRoom), Context(Some(connection), _, _)) ⇒

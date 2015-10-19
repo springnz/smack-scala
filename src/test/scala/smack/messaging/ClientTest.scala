@@ -258,6 +258,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       "member should get joined rooms" in new TestFunctionsWithDomain {
         getMemberJoinedRooms
       }
+
+      "member should get membership without joining" in new TestFunctionsWithDomain {
+        getMembership
+      }
     }
   }
 
@@ -596,7 +600,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     def failNonMember = {
       withChatRoom() {
         withTwoConnectedUsers {
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Failure(Forbidden)
         }
       }
@@ -607,7 +611,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
         }
       }
@@ -619,11 +623,24 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(room2, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(room2, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(room2, username1Nickname)
           joined.value.get shouldBe Success(Joined)
 
           val rooms = user1 ? GetJoinedRooms
           rooms.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(ChatRoom("chat2"), chatService))
+        }
+      }
+    }
+
+    def getMembership = {
+      withChatRoom() {
+        val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+        reg.value.get shouldBe Success(Joined)
+        withTwoConnectedUsers {
+          val joined = user1 ? GetJoinedRooms
+          joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set()
+          val member = user1 ? GetRoomMembers(chatRoom)
+          member.mapTo[GetRoomMembersResponse].value.get.get.members shouldBe Set(MemberInfo(username1.getFullyQualifiedUser(Domain(domain)), chatRoom ))
         }
       }
     }
@@ -633,7 +650,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
           val reg2 = user1 ? RegisterChatRoomMembership(chatRoom, username2)
           reg2.value.get shouldBe Failure(Forbidden)
@@ -646,12 +663,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
           val reg2 = adminUser ? RegisterChatRoomMembership(chatRoom, username2)
           reg2.value.get shouldBe Success(Joined)
-          val joined2 = user2 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
-          joined2.value.get shouldBe Failure(NicknameTaken(ChatNickname(username1Nickname)))
+          val joined2 = user2 ? ChatRoomJoin(chatRoom, username1Nickname)
+          joined2.value.get shouldBe Failure(NicknameTaken(username1Nickname))
         }
       }
     }
@@ -661,11 +678,11 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
           val remove = adminUser ? RemoveChatRoomMembership(chatRoom, username1)
           remove.value.get shouldBe Success(Destroyed)
-          val joined2 = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined2 = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined2.value.get shouldBe Failure(Forbidden)
         }
       }
@@ -676,7 +693,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
           val remove = user1 ? RemoveChatRoomMembership(chatRoom, username1)
           remove.value.get shouldBe Failure(Forbidden)
@@ -706,8 +723,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     val username1 = randomUsername
     val username2 = randomUsername
-    val username1Nickname = "user1Nick"
-    val username2Nickname = "user2Nick"
+    val username1Nickname = ChatNickname("user1Nick")
+    val username2Nickname = ChatNickname("user2Nick")
     val user1Pass = Password(username1.value)
     val user2Pass = Password(username2.value)
     val user1Listener = newEventListener
