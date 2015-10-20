@@ -401,7 +401,8 @@ class Client extends FSM[State, Context] {
     case Event(Messages.GetRoomMembers(room), Context(Some(connection), _, _)) ⇒
       withChatRoom(room, connection) { chat ⇒
         val response: akka.actor.Status.Status = Try {
-          sender ! Messages.GetRoomMembersResponse((chat.getMembers map (m ⇒ MemberInfo(UserWithDomain(m.getJid), room))).toSet)
+          val members = chat.getMembers map (m ⇒ MemberInfo(UserWithDomain(m.getJid), room))
+          sender ! Messages.GetRoomMembersResponse(members.toSet)
         } match {
           case Failure(t) ⇒ t match {
             case ex: XMPPErrorException ⇒
