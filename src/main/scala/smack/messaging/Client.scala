@@ -111,7 +111,6 @@ object Client {
     case class GetRoomMembers(room: ChatRoom)
     case class GetRoomMembersResponse(members: Set[MemberInfo])
 
-    object GetJoinedRooms
     object GetChatRooms
     object Created
     object Destroyed
@@ -397,24 +396,6 @@ class Client extends FSM[State, Context] {
 
     case Event(Messages.GetChatRooms, Context(Some(connection), _, _)) ⇒
       sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getHostedRooms(chatService.value).map(c ⇒ ChatRoomId.apply(c.getJid).get).toSet)
-      stay
-
-    case Event(Messages.GetJoinedRooms, Context(Some(connection), _, _)) ⇒
-      val manager = MultiUserChatManager.getInstanceFor(connection)
-      val rooms = manager.getHostedRooms(chatService.value) filter { c ⇒
-        val member = User(connection.getUser).getFullyQualifiedUser(defaultDomain)
-        Try {
-          //there doesn't appear to be any way to know whether a user is a member if not logged in
-          //and xmpp throws a forbidden exception if the user isn't a member of a room and asks for the roster
-          //so this hack appears to be the only way to get all of the rooms where a user is member regardless of joined status
-          manager.getMultiUserChat(c.getJid).getMembers exists (m ⇒ m.getJid == member.value)
-        } match {
-          case Failure(t) ⇒ false
-          case _          ⇒ true
-        }
-
-      } map (c ⇒ ChatRoomId(c.getJid).get)
-      sender ! Messages.GetChatRoomsResponse(rooms.toSet)
       stay
 
     case Event(Messages.GetRoomMembers(room), Context(Some(connection), _, _)) ⇒

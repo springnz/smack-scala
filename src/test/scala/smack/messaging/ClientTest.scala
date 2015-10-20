@@ -47,6 +47,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             registration
           }
 
+          "trying to register after a failure" in new TestFunctions {
+            canRegisterAfterFailure
+          }
+
           "users chat to each other" in new TestFunctions {
             chat
           }
@@ -138,10 +142,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           "user gets membership" in new TestFunctions {
             getMembership
           }
-
-          "user get membership - multiple rooms test" in new TestFunctions {
-            getMembershipMultipleRooms
-          }
         }
 
         "fails" when {
@@ -181,6 +181,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
           "allowing user registration" in new TestFunctionsWithDomain {
             registration
+          }
+
+          "trying to register after a failure" in new TestFunctionsWithDomain {
+            canRegisterAfterFailure
           }
 
           "users chat to each other" in new TestFunctionsWithDomain {
@@ -274,10 +278,6 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
          "user gets membership" in new TestFunctionsWithDomain {
            getMembership
          }
-
-         "user get membership - multiple rooms test" in new TestFunctionsWithDomain {
-           getMembershipMultipleRooms
-         }
        }
 
        "fails" when {
@@ -342,6 +342,21 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       adminUser ! RegisterUser(username, userPass)
       val registration = adminUser ? RegisterUser(username, userPass)
       registration.value.get shouldBe Failure(DuplicateUser(username))
+    }
+
+    def canRegisterAfterFailure = {
+      val username = randomUsername
+      val userPass = Password(username.value)
+
+      adminUser ? Connect(User(adminUsername), Password(adminPassword))
+      adminUser ! RegisterUser(username, userPass)
+      val registration = adminUser ? RegisterUser(username, userPass)
+      registration.value.get shouldBe Failure(DuplicateUser(username))
+
+      val username2 = randomUsername
+      val userPass2 = Password(username2.value)
+      val registration2 = adminUser ? RegisterUser(username2, userPass2)
+      registration2.value.get shouldBe Success(Created)
     }
 
     def invalidRegistration: Unit = {
@@ -666,35 +681,18 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
         reg.value.get shouldBe Success(Joined)
         withTwoConnectedUsers {
-          val joined = user1 ? GetJoinedRooms
-          joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(chatRoom, chatService))
           val member = user1 ? GetRoomMembers(chatRoom)
           member.mapTo[GetRoomMembersResponse].value.get.get.members shouldBe Set(MemberInfo(username1.getFullyQualifiedUser(domain), chatRoom))
         }
       }
     }
 
-    def getMembershipMultipleRooms = {
-      val chat2 = ChatRoom("chat2")
-      withChatRoom(Set(chatRoom, chat2)) {
-        val reg = adminUser ? RegisterChatRoomMembership(chat2, username1)
-        reg.value.get shouldBe Success(Joined)
-        withTwoConnectedUsers {
-          val joined = user1 ? GetJoinedRooms
-          joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(chat2, chatService))
-          val member = user1 ? GetRoomMembers(chat2)
-          member.mapTo[GetRoomMembersResponse].value.get.get.members shouldBe Set(MemberInfo(username1.getFullyQualifiedUser(domain), chat2))
-        }
-      }
-    }
 
     def forbiddenMembership = {
       withChatRoom() {
         val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
         reg.value.get shouldBe Success(Joined)
         withTwoConnectedUsers {
-          val joined = user2 ? GetJoinedRooms
-          joined.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set()
           val member = user2 ? GetRoomMembers(chatRoom)
           member.value.get shouldBe Failure(Forbidden)
         }
