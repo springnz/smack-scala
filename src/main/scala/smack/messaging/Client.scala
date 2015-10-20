@@ -42,7 +42,7 @@ object Client {
 
     def getFullyQualifiedUser(defaultDomain: Domain): UserWithDomain = {
       val (user, domain) = splitUserIntoNameAndDomain(defaultDomain)
-      return user getFullyQualifiedUser domain
+      user getFullyQualifiedUser domain
     }
   }
 
@@ -58,6 +58,7 @@ object Client {
   case class Domain(value: String) extends AnyVal
   case class MessageId(value: String) extends AnyVal
 
+  case class MemberInfo(user: UserWithDomain, room: ChatRoom)
   case class ChatRoom(value: String) extends AnyVal
   case class ChatService(value: String) extends AnyVal
   case class ChatNickname(value: String) extends AnyVal
@@ -106,8 +107,11 @@ object Client {
     case class ChatRoomJoin(room: ChatRoom, name: ChatNickname)
     case class GetChatRoomsResponse(rooms: Set[ChatRoomId])
     case class DeleteChatRoom(room: ChatRoom, reason: Option[ChatRoomStatus] = None, alternativeRoom: Option[ChatRoom] = None)
+
+    case class GetRoomMembers(room: ChatRoom)
+    case class GetRoomMembersResponse(members: Set[MemberInfo])
+
     object GetChatRooms
-    object GetJoinedRooms
     object Created
     object Destroyed
     object Joined
@@ -367,15 +371,22 @@ class Client extends FSM[State, Context] {
           chat.join(nickname.value)
         } match {
           case Failure(t) ⇒
-            log.error(t, s"Failure to join room ${room.value}")
             t match {
               case ex: XMPPErrorException ⇒
-                if (ex.getXMPPError.getCondition == XMPPError.Condition.registration_required && ex.getXMPPError.getType == XMPPError.Type.AUTH)
+                if (ex.getXMPPError.getCondition == XMPPError.Condition.registration_required && ex.getXMPPError.getType == XMPPError.Type.AUTH) {
+                  log.warning(s"${nickname.value} failure to join room ${room.value} because not registered")
                   ActorFailure(Messages.Forbidden)
-                else if (ex.getXMPPError.getCondition == XMPPError.Condition.conflict && ex.getXMPPError.getType == XMPPError.Type.CANCEL)
+                } else if (ex.getXMPPError.getCondition == XMPPError.Condition.conflict && ex.getXMPPError.getType == XMPPError.Type.CANCEL) {
+                  log.warning(s"${nickname.value} failure to join room ${room.value} because nickname already taken")
                   ActorFailure(Messages.NicknameTaken(nickname))
-                else ActorFailure(Messages.GeneralSmackError(t))
-              case _ ⇒ ActorFailure(t)
+                } else {
+                  log.error(t, s"Error joining room ${room.value}")
+                  ActorFailure(Messages.GeneralSmackError(t))
+                }
+              case _ ⇒ {
+                log.error(t, s"Error joining room ${room.value}")
+                ActorFailure(t)
+              }
             }
           case _ ⇒ ActorSuccess(Messages.Joined)
         }
@@ -387,8 +398,24 @@ class Client extends FSM[State, Context] {
       sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getHostedRooms(chatService.value).map(c ⇒ ChatRoomId.apply(c.getJid).get).toSet)
       stay
 
-    case Event(Messages.GetJoinedRooms, Context(Some(connection), _, _)) ⇒
-      sender ! Messages.GetChatRoomsResponse(MultiUserChatManager.getInstanceFor(connection).getJoinedRooms().map(c ⇒ ChatRoomId.apply(c).get).toSet)
+    case Event(Messages.GetRoomMembers(room), Context(Some(connection), _, _)) ⇒
+      withChatRoom(room, connection) { chat ⇒
+        val response: akka.actor.Status.Status = Try {
+          val members = chat.getMembers map (m ⇒ MemberInfo(UserWithDomain(m.getJid), room))
+          sender ! Messages.GetRoomMembersResponse(members.toSet)
+        } match {
+          case Failure(t) ⇒ t match {
+            case ex: XMPPErrorException ⇒
+              if (ex.getXMPPError.getCondition == XMPPError.Condition.forbidden && ex.getXMPPError.getType == XMPPError.Type.AUTH)
+                ActorFailure(Messages.Forbidden)
+              else ActorFailure(Messages.GeneralSmackError(t))
+            case _ ⇒ ActorFailure(t)
+          }
+          case Success(members) ⇒ ActorSuccess(members)
+        }
+        sender ! response
+      }
+
       stay
 
     case Event(Messages.DeleteChatRoom(chatRoom, status, altRoom), Context(Some(connection), _, _)) ⇒

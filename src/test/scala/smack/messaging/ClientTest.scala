@@ -17,7 +17,7 @@ import org.scalatest
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.{ BeforeAndAfterEach, Matchers, WordSpec }
 import scala.collection.JavaConversions._
-import scala.concurrent.{ExecutionContext, Future, Await}
+import scala.concurrent.{ ExecutionContext, Future, Await }
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
 import akka.actor.Status.{ Failure ⇒ ActorFailure }
@@ -33,231 +33,279 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   val config = ConfigFactory.load
   val adminUsername = config.getString("messaging.admin.username")
   val adminPassword = config.getString("messaging.admin.password")
-  val domain = config.getString("messaging.domain")
+  val domain = Domain(config.getString("messaging.domain"))
 
   "A client" when {
-    "usernames don't have domains " should {
-      "connects to the xmpp server" in new TestFunctions {
-        connected
+    "usernames are missing domains " should {
+      "have simple functionality" that {
+        "succeeds" when {
+          "connecting to the xmpp server" in new TestFunctions {
+            connected
+          }
+
+          "allowing user registration" in new TestFunctions {
+            registration
+          }
+
+          "trying to register after a failure" in new TestFunctions {
+            canRegisterAfterFailure
+          }
+
+          "users chat to each other" in new TestFunctions {
+            chat
+          }
+
+          "user async chats (message recipient offline)" in new TestFunctions {
+            asyncChat
+          }
+
+          "chat partners become available / unavailable" in new TestFunctions {
+            availability
+          }
+
+          "user requests roster" in new TestFunctions {
+            roster
+          }
+
+          "user subscribes to sender" in new TestFunctions {
+            receiverConnects
+          }
+        }
+
+        "fails" when {
+          "user attempts duplicate registration" in new TestFunctions {
+            sameRegistration
+          }
+
+          "user attempts registration with username same as domain" in new TestFunctions {
+            invalidRegistration
+          }
+
+          "should reject registration with username same as admin" in new TestFunctions {
+            invalidAdminRegistration
+          }
+        }
       }
 
-      "allows user registration and deletion" in new TestFunctions {
-        registration
+      "have extended functionality" that {
+        "enables XEP-0066 file transfers" in new TestFunctions {
+          XEP_0066_FileTransfers
+        }
+
+        "enables file upload mock" in new TestFunctions {
+          fileUpload
+        }
+
+        "handles file upload error mock" in new TestFunctions with UploadError {
+          fileUploadWithError
+        }
+
+        "handles s3 upload" in new TestFunctions with UploadS3 {
+          fileUpload
+        }
+
+        "handles s3 upload with error" ignore new TestFunctions with UploadS3 {
+          fileUploadWithError
+        }
+
+        "acknowledges delivered message" in new TestFunctions {
+          deliveryAcknowledged
+        }
+
+        "acknowledges delivered async message" in new TestFunctions {
+          asyncDeliveryAck
+        }
+
+        "tracks message unack" in new TestFunctions {
+          deliveryEnsureIdTracking
+        }
+
+        "gets message history" in new TestFunctions {
+          chatHistory
+        }
       }
 
-      "should reject duplicate registration" in new TestFunctions {
-        sameRegistration
-      }
+      "multi-user chat" that {
+        "succeeds" when {
+          "creating group chatroom" in new TestFunctions {
+            createChatRoom
+          }
 
-      "should reject registration with username same as domain" in new TestFunctions {
-        invalidRegistration
-      }
+          "member joins room" in new TestFunctions {
+            memberJoin
+          }
 
-      "should reject registration with username same as admin" in new TestFunctions {
-        invalidAdminRegistration
-      }
+          "admin removes member" in new TestFunctions {
+            removeMember
+          }
 
-      "enables users to chat to each other" in new TestFunctions {
-        chat
-      }
+          "user gets membership" in new TestFunctions {
+            getMembership
+          }
+        }
 
-      "enables async chats (message recipient offline)" in new TestFunctions {
-        asyncChat
-      }
+        "fails" when {
+          "creating chatroom that already exists" in new TestFunctions {
+            createMultipleChatRooms
+          }
 
-      "enables XEP-0066 file transfers" in new TestFunctions {
-        XEP_0066_FileTransfers
-      }
+          "non-member tries to join room" in new TestFunctions {
+            failNonMember
+          }
 
-      "enables mock file upload" in new TestFunctions {
-        fileUpload
-      }
+          "non admin tries to accept member" in new TestFunctions {
+            nonAdminMemberFail
+          }
 
-      "handles file upload error mock" in new TestFunctions with UploadError {
-        fileUploadWithError
-      }
+          "user tries to join with same nickname" in new TestFunctions {
+            sameNickname
+          }
 
-      "handles s3 upload" ignore new TestFunctions with UploadS3 {
-        fileUpload
-      }
+          "non admin tries to remove member" in new TestFunctions {
+            nonAdminRemoveFail
+          }
 
-      "handles s3 upload with error" ignore new TestFunctions with UploadS3 {
-        fileUploadWithError
-      }
-
-      "informs event listeners about chat partners becoming available / unavailable" in new TestFunctions {
-        availability
-      }
-
-      "provides information about who is online and offline (roster)" in new TestFunctions {
-        roster
-      }
-
-      "message receiver subscribes to sender" in new TestFunctions {
-        receiverConnects
-      }
-
-      "message delivered acknowledgement" in new TestFunctions {
-        deliveryAcknowledged
-      }
-
-      "async message delivered acknowledgement" in new TestFunctions {
-        asyncDeliveryAck
-      }
-
-      "message unack tracking" in new TestFunctions {
-        deliveryEnsureIdTracking
-      }
-
-      "creates group chatroom" in new TestFunctions {
-        createChatRoom
-      }
-
-      "non-admin can't create room" ignore new TestFunctions {
-        createNonAdminFail
-      }
-
-      "fail on chatroom already exists" in new TestFunctions {
-        createMultipleChatRooms
-      }
-
-      "fail on non-member joining room" in new TestFunctions {
-        failNonMember
-      }
-
-      "member joining room" in new TestFunctions {
-        memberJoin
-      }
-
-      "non admin can't accept member" in new TestFunctions {
-        nonAdminMemberFail
-      }
-
-      "can't join with same nickname" in new TestFunctions {
-        sameNickname
-      }
-
-      "admin can remove member" in new TestFunctions {
-        removeMember
-      }
-
-      "non admin can\'t remove member" in new TestFunctions {
-        nonAdminRemoveFail
-      }
-
-      "member should get joined rooms" in new TestFunctions {
-        getMemberJoinedRooms
+          "user tries to get membership when not part of group" in new TestFunctions {
+            forbiddenMembership
+          }
+        }
       }
     }
 
     "usernames have domains " should {
-      "connects to the xmpp server" in new TestFunctionsWithDomain {
-        connected
+      "have simple functionality" that {
+        "succeeds" when {
+          "connecting to the xmpp server" in new TestFunctionsWithDomain {
+            connected
+          }
+
+          "allowing user registration" in new TestFunctionsWithDomain {
+            registration
+          }
+
+          "trying to register after a failure" in new TestFunctionsWithDomain {
+            canRegisterAfterFailure
+          }
+
+          "users chat to each other" in new TestFunctionsWithDomain {
+            chat
+          }
+
+          "user async chats (message recipient offline)" in new TestFunctionsWithDomain {
+            asyncChat
+          }
+
+          "chat partners become available / unavailable" in new TestFunctionsWithDomain {
+            availability
+          }
+
+          "user requests roster" in new TestFunctionsWithDomain {
+            roster
+          }
+
+          "user subscribes to sender" in new TestFunctionsWithDomain {
+            receiverConnects
+          }
+        }
+
+        "fails" when {
+          "user attempts duplicate registration" in new TestFunctionsWithDomain {
+            sameRegistration
+          }
+
+          "user attempts registration with username same as domain" in new TestFunctionsWithDomain {
+            invalidRegistration
+          }
+
+          "should reject registration with username same as admin" in new TestFunctionsWithDomain {
+            invalidAdminRegistration
+          }
+        }
       }
 
-      "allows user registration" in new TestFunctionsWithDomain {
-        registration
+      "have extended functionality" that {
+        "enables XEP-0066 file transfers" in new TestFunctionsWithDomain {
+          XEP_0066_FileTransfers
+        }
+
+        "enables file upload mock" in new TestFunctionsWithDomain {
+          fileUpload
+        }
+
+        "handles file upload error mock" in new TestFunctionsWithDomain with UploadError {
+          fileUploadWithError
+        }
+
+        "handles s3 upload" in new TestFunctionsWithDomain with UploadS3 {
+          fileUpload
+        }
+
+        "handles s3 upload with error" ignore new TestFunctionsWithDomain with UploadS3 {
+          fileUploadWithError
+        }
+
+        "acknowledges delivered message" in new TestFunctionsWithDomain {
+          deliveryAcknowledged
+        }
+
+        "acknowledges delivered async message" in new TestFunctionsWithDomain {
+          asyncDeliveryAck
+        }
+
+        "tracks message unack" in new TestFunctionsWithDomain {
+          deliveryEnsureIdTracking
+        }
+
+        "gets message history" in new TestFunctionsWithDomain {
+          chatHistory
+        }
       }
 
-      "should reject duplicate registration" in new TestFunctionsWithDomain {
-        sameRegistration
-      }
+     "multi-user chat" that {
+       "succeeds" when {
+         "creating group chatroom" in new TestFunctionsWithDomain {
+           createChatRoom
+         }
 
-      "should reject registration with username same as domain" in new TestFunctionsWithDomain {
-        invalidRegistration
-      }
+         "member joins room" in new TestFunctionsWithDomain {
+           memberJoin
+         }
 
-      "enables users to chat to each other" in new TestFunctionsWithDomain {
-        chat
-      }
+         "admin removes member" in new TestFunctionsWithDomain {
+           removeMember
+         }
 
-      "enables async chats (message recipient offline)" in new TestFunctionsWithDomain {
-        asyncChat
-      }
+         "user gets membership" in new TestFunctionsWithDomain {
+           getMembership
+         }
+       }
 
-      "enables XEP-0066 file transfers" in new TestFunctionsWithDomain {
-        XEP_0066_FileTransfers
-      }
+       "fails" when {
+         "creating chatroom that already exists" in new TestFunctionsWithDomain {
+           createMultipleChatRooms
+         }
 
-      "enables file upload mock" in new TestFunctionsWithDomain {
-        fileUpload
-      }
+         "non-member tries to join room" in new TestFunctionsWithDomain {
+           failNonMember
+         }
 
-      "handles file upload error mock" in new TestFunctionsWithDomain with UploadError {
-        fileUploadWithError
-      }
+         "non admin tries to accept member" in new TestFunctionsWithDomain {
+           nonAdminMemberFail
+         }
 
-      "handles s3 upload" in new TestFunctionsWithDomain with UploadS3 {
-        fileUpload
-      }
+         "user tries to join with same nickname" in new TestFunctionsWithDomain {
+           sameNickname
+         }
 
-      "handles s3 upload with error" ignore new TestFunctionsWithDomain with UploadS3 {
-        fileUploadWithError
-      }
+         "non admin tries to remove member" in new TestFunctionsWithDomain {
+           nonAdminRemoveFail
+         }
 
-      "informs event listeners about chat partners becoming available / unavailable" in new TestFunctionsWithDomain {
-        availability
-      }
-
-      "provides information about who is online and offline (roster)" in new TestFunctionsWithDomain {
-        roster
-      }
-
-      "message receiver subscribes to sender" in new TestFunctionsWithDomain {
-        receiverConnects
-      }
-
-      "message delivered acknowledgement" in new TestFunctionsWithDomain {
-        deliveryAcknowledged
-      }
-
-      "async message delivered acknowledgement" in new TestFunctionsWithDomain {
-        asyncDeliveryAck
-      }
-
-      "message unack tracking" in new TestFunctionsWithDomain {
-        deliveryEnsureIdTracking
-      }
-
-      "message history" in new TestFunctionsWithDomain {
-        chatHistory
-      }
-
-      "creates group chatroom" in new TestFunctionsWithDomain {
-        createChatRoom
-      }
-
-      "fail on chatroom already exists" in new TestFunctionsWithDomain {
-        createMultipleChatRooms
-      }
-
-      "fail on non-member joining room" in new TestFunctionsWithDomain {
-        failNonMember
-      }
-
-      "member joining room" in new TestFunctionsWithDomain {
-        memberJoin
-      }
-
-      "non admin can't accept member" in new TestFunctionsWithDomain {
-        nonAdminMemberFail
-      }
-
-      "can't join with same nickname" in new TestFunctionsWithDomain {
-        sameNickname
-      }
-
-      "admin can remove member" in new TestFunctionsWithDomain {
-        removeMember
-      }
-
-      "non admin can\'t remove member" in new TestFunctionsWithDomain {
-        nonAdminRemoveFail
-      }
-
-      "member should get joined rooms" in new TestFunctionsWithDomain {
-        getMemberJoinedRooms
-      }
+         "user tries to get membership when not part of group" in new TestFunctionsWithDomain {
+           forbiddenMembership
+         }
+       }
+     }
     }
   }
 
@@ -296,8 +344,23 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       registration.value.get shouldBe Failure(DuplicateUser(username))
     }
 
+    def canRegisterAfterFailure = {
+      val username = randomUsername
+      val userPass = Password(username.value)
+
+      adminUser ? Connect(User(adminUsername), Password(adminPassword))
+      adminUser ! RegisterUser(username, userPass)
+      val registration = adminUser ? RegisterUser(username, userPass)
+      registration.value.get shouldBe Failure(DuplicateUser(username))
+
+      val username2 = randomUsername
+      val userPass2 = Password(username2.value)
+      val registration2 = adminUser ? RegisterUser(username2, userPass2)
+      registration2.value.get shouldBe Success(Created)
+    }
+
     def invalidRegistration: Unit = {
-      val username = User(domain);
+      val username = User(domain.value);
       val userPass = Password(username.value)
 
       val connected = adminUser ? Connect(User(adminUsername), Password(adminPassword))
@@ -342,7 +405,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val fileDescription = FileDescription(Some("file description"))
         user1 ! SendUrlMessage(username2, fileUrl, fileDescription)
 
-        user2Listener.expectMsgPF(3 seconds, "xep-0066 file transfer") {
+        user2Listener.expectMsgPF(timeout.duration, "xep-0066 file transfer") {
           case FileMessageReceived(chat, message, outOfBandData) ⇒
             chat.getParticipant should startWith(username1.value)
             message.getTo should startWith(username2.value)
@@ -371,7 +434,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           case _ ⇒ false
         }
 
-        user2Listener.fishForMessage(3 seconds, "file transfer") {
+        user2Listener.fishForMessage(timeout.duration, "file transfer") {
           case FileMessageReceived(chat, message, outOfBandData) ⇒
             chat.getParticipant should startWith(username1.value)
             message.getTo should startWith(username2.value)
@@ -389,7 +452,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         val fileDescription = Some("file description")
         user1 ! SendFileMessage(username2, file, FileDescription(fileDescription))
 
-        user1Listener.fishForMessage(3 seconds, "file upload error") {
+        user1Listener.fishForMessage(timeout.duration, "file upload error") {
           case ActorFailure(FileUploadError(ex)) ⇒
             true
           case _ ⇒ false
@@ -401,7 +464,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       withTwoConnectedUsers {
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
-        user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 came online") {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
             true
@@ -409,7 +472,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         }
 
         user2 ! Disconnect
-        user1Listener.fishForMessage(3 seconds, "notification that user2 went offline") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 went offline") {
           case UserBecameUnavailable(user) ⇒
             user.value should startWith(username2.value)
             true
@@ -417,7 +480,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         }
 
         user2 ! Connect(username2, user2Pass)
-        user1Listener.fishForMessage(3 seconds, "notification that user2 came online") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 came online") {
           case UserBecameAvailable(user) ⇒
             user.value should startWith(username2.value)
             true
@@ -458,10 +521,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user2 ! RegisterEventListener(user2Listener.ref)
 
         val user1MessageIdFuture = (user1 ? SendMessage(username2, testMessage)).mapTo[MessageId]
-        val user1MessageId = Await.result(user1MessageIdFuture, 3 seconds)
+        val user1MessageId = Await.result(user1MessageIdFuture, timeout.duration)
 
         val unackedMessageFuture = (user1 ? GetUnackMessages(username2)).mapTo[GetUnackMessagesResponse]
-        Await.result(unackedMessageFuture, 3 seconds) match {
+        Await.result(unackedMessageFuture, timeout.duration) match {
           case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
             ids.size shouldBe 1
@@ -475,7 +538,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
         verifyMessageDelivery(user1Listener, username1, username2, user1MessageIdFuture)
         val emptyUnacked = (user1 ? GetUnackMessages(username2)).mapTo[GetUnackMessagesResponse]
-        Await.result(emptyUnacked, 3 seconds) match {
+        Await.result(emptyUnacked, timeout.duration) match {
           case GetUnackMessagesResponse(user, ids) ⇒
             user.value should startWith(username2.value)
             ids.isEmpty shouldBe true
@@ -488,7 +551,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-        user1Listener.fishForMessage(3 seconds, "notification that user2 is in roster") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 is in roster") {
           case UserBecameAvailable(user) ⇒
             val roster = getRoster(user1)
             roster.getEntries should have size 1
@@ -500,7 +563,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         }
 
         user2 ! Disconnect
-        user1Listener.fishForMessage(3 seconds, "notification that user2 is not in roster") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user2 is not in roster") {
           case UserBecameUnavailable(user) ⇒
             val roster = getRoster(user1)
             roster.getEntries should have size 1
@@ -518,7 +581,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendMessage(username2, testMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
-        user2Listener.fishForMessage(3 seconds, "notification that user1 is in roster") {
+        user2Listener.fishForMessage(timeout.duration, "notification that user1 is in roster") {
           case UserBecameAvailable(user) ⇒
             val roster = getRoster(user2)
             roster.getEntries should have size 1
@@ -538,31 +601,31 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         user1 ! SendMessage(username2, anotherMessage)
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
 
+
         Thread.sleep(1000) //let messages reach archive
         user1 ! ArchiveMessageRequest(username2)
-        user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user1 sent a message to user2") {
           case ArchiveMessageResponse(to, from, msg, origStamp, id, _) ⇒
-            to.value shouldBe username2.value
-            from.value shouldBe username1.value + "/Smack"
+            to.value shouldBe username2.getFullyQualifiedUser(domain).value
+            from.value shouldBe username1.getFullyQualifiedUser(domain).value + "/Smack"
             msg.getBody shouldBe testMessage
             true
           case _ ⇒ false
         }
 
-        user1Listener.fishForMessage(3 seconds, "notification that user1 sent a message to user2") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user1 sent a message to user2") {
           case ArchiveMessageResponse(to, from, msg, origStamp, id, _) ⇒
-            to.value shouldBe username2.value
-            from.value shouldBe username1.value + "/Smack"
+            to.value shouldBe username2.getFullyQualifiedUser(domain).value
+            from.value shouldBe username1.getFullyQualifiedUser(domain).value + "/Smack"
             msg.getBody shouldBe anotherMessage
             true
           case _ ⇒ false
         }
 
-        user1Listener.fishForMessage(3 seconds, "notification that user1 is sent end message") {
+        user1Listener.fishForMessage(timeout.duration, "notification that user1 is sent end message") {
           case ArchiveMessageEnd(_, _, _, _, _) ⇒ true
           case m                                ⇒ false
         }
-
       }
     }
 
@@ -596,7 +659,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     def failNonMember = {
       withChatRoom() {
         withTwoConnectedUsers {
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Failure(Forbidden)
         }
       }
@@ -607,23 +670,31 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
         }
       }
     }
 
-    def getMemberJoinedRooms = {
-      val room2 = ChatRoom("chat2")
-      withChatRoom(Set(chatRoom, room2)) {
+    def getMembership = {
+      withChatRoom() {
+        val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+        reg.value.get shouldBe Success(Joined)
         withTwoConnectedUsers {
-          val reg = adminUser ? RegisterChatRoomMembership(room2, username1)
-          reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(room2, ChatNickname(username1Nickname))
-          joined.value.get shouldBe Success(Joined)
+          val member = user1 ? GetRoomMembers(chatRoom)
+          member.mapTo[GetRoomMembersResponse].value.get.get.members shouldBe Set(MemberInfo(username1.getFullyQualifiedUser(domain), chatRoom))
+        }
+      }
+    }
 
-          val rooms = user1 ? GetJoinedRooms
-          rooms.mapTo[GetChatRoomsResponse].value.get.get.rooms shouldBe Set(ChatRoomId(ChatRoom("chat2"), chatService))
+
+    def forbiddenMembership = {
+      withChatRoom() {
+        val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+        reg.value.get shouldBe Success(Joined)
+        withTwoConnectedUsers {
+          val member = user2 ? GetRoomMembers(chatRoom)
+          member.value.get shouldBe Failure(Forbidden)
         }
       }
     }
@@ -633,7 +704,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
           val reg2 = user1 ? RegisterChatRoomMembership(chatRoom, username2)
           reg2.value.get shouldBe Failure(Forbidden)
@@ -646,12 +717,12 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
           val reg2 = adminUser ? RegisterChatRoomMembership(chatRoom, username2)
           reg2.value.get shouldBe Success(Joined)
-          val joined2 = user2 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
-          joined2.value.get shouldBe Failure(NicknameTaken(ChatNickname(username1Nickname)))
+          val joined2 = user2 ? ChatRoomJoin(chatRoom, username1Nickname)
+          joined2.value.get shouldBe Failure(NicknameTaken(username1Nickname))
         }
       }
     }
@@ -661,11 +732,11 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
           val remove = adminUser ? RemoveChatRoomMembership(chatRoom, username1)
           remove.value.get shouldBe Success(Destroyed)
-          val joined2 = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined2 = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined2.value.get shouldBe Failure(Forbidden)
         }
       }
@@ -676,7 +747,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         withTwoConnectedUsers {
           val reg = adminUser ? RegisterChatRoomMembership(chatRoom, username1)
           reg.value.get shouldBe Success(Joined)
-          val joined = user1 ? ChatRoomJoin(chatRoom, ChatNickname(username1Nickname))
+          val joined = user1 ? ChatRoomJoin(chatRoom, username1Nickname)
           joined.value.get shouldBe Success(Joined)
           val remove = user1 ? RemoveChatRoomMembership(chatRoom, username1)
           remove.value.get shouldBe Failure(Forbidden)
@@ -686,7 +757,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     private def getRoster(u: TestActorRef[Nothing]): Roster = {
       val rosterFuture = (u ? GetRoster).mapTo[GetRosterResponse]
-      Await.result(rosterFuture, 3 seconds).roster
+      Await.result(rosterFuture, timeout.duration).roster
     }
   }
 
@@ -706,8 +777,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
     val username1 = randomUsername
     val username2 = randomUsername
-    val username1Nickname = "user1Nick"
-    val username2Nickname = "user2Nick"
+    val username1Nickname = ChatNickname("user1Nick")
+    val username2Nickname = ChatNickname("user2Nick")
     val user1Pass = Password(username1.value)
     val user2Pass = Password(username2.value)
     val user1Listener = newEventListener
@@ -760,17 +831,17 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
-    def withChatRoom(toJoin: Set[ChatRoom] = Set(chatRoom)) (block: ⇒ Unit): Unit = {
+    def withChatRoom(toJoin: Set[ChatRoom] = Set(chatRoom))(block: ⇒ Unit): Unit = {
       withChatRoomsActivated {
         try {
-          toJoin foreach {r =>
+          toJoin foreach { r ⇒
             val room = adminUser ? CreateChatRoom(r)
             room.value.get shouldBe Success(Created)
           }
 
           block
         } finally {
-          toJoin foreach { r =>
+          toJoin foreach { r ⇒
             adminUser ? DeleteChatRoom(r)
           }
         }
@@ -778,7 +849,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def verifyMessageArrived(testProbe: TestProbe, sender: User, recipient: User, messageBody: String): Unit = {
-      testProbe.fishForMessage(3 seconds, "expected message to be delivered") {
+      testProbe.fishForMessage(timeout.duration, "expected message to be delivered") {
         case MessageReceived(chat, message) ⇒
           chat.getParticipant should startWith(sender.value)
           message.getTo should startWith(recipient.value)
@@ -789,9 +860,9 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
     }
 
     def verifyMessageDelivery(testProbe: TestProbe, sender: User, recipient: User, messageIdFuture: Future[Any]): Unit = {
-      testProbe.fishForMessage(3 seconds, "notification that message has been delivered") {
+      testProbe.fishForMessage(timeout.duration, "notification that message has been delivered") {
         case MessageDelivered(to, msgId) ⇒
-          Await.result(messageIdFuture, 3 seconds) match {
+          Await.result(messageIdFuture, timeout.duration) match {
             case MessageId(messageId) ⇒
               to.value should startWith(recipient.value)
               msgId.value should equal(messageId)
@@ -833,7 +904,7 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
   }
 
   def randomUsername = User(s"testuser-${UUID.randomUUID.toString.substring(9)}")
-  def nameWithDomain(u: User) = u.copy(value = u.value + s"@$domain")
+  def nameWithDomain(u: User) = u.copy(value = u.value + s"@${domain.value}")
 
   override def beforeEach() {
     system = ActorSystem()
