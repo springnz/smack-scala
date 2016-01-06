@@ -48,7 +48,7 @@ object Client {
 
   case class UserWithoutDomain(value: String) extends AnyVal {
     def getFullyQualifiedUser(d: Domain): UserWithDomain = {
-      UserWithDomain(s"${value}@${d.value}")
+      UserWithDomain(s"$value@${d.value}")
     }
   }
 
@@ -87,13 +87,43 @@ object Client {
     id: MessageId,
     status: MessageStatus)
 
+  sealed trait ChannelState {
+    val messages: Seq[MessageState]
+
+    def withMessage(msg: MessageState): ChannelState
+
+    def close(): Unit
+
+    def sendMessage(msg: Message): Unit
+  }
+
   case class ChatState(
     channel: Chat,
-    messages: Seq[MessageState])
+    override val messages: Seq[MessageState]) extends ChannelState {
+
+    override def withMessage(msg: MessageState): ChatState = this.copy(messages = messages :+ msg)
+
+    override def close(): Unit = channel.close()
+
+    override def sendMessage(msg: Message): Unit = channel.sendMessage(msg)
+
+  }
+
+  case class MultiUserChatState(
+    channel: MultiUserChat,
+    override val messages: Seq[MessageState]) extends ChannelState {
+
+    override def withMessage(msg: MessageState): MultiUserChatState = this.copy(messages = messages :+ msg)
+
+    override def close(): Unit = channel.leave()
+
+    override def sendMessage(msg: Message): Unit = channel.sendMessage(msg)
+
+  }
 
   case class Context(
     connection: Option[XMPPTCPConnection],
-    chats: Map[UserWithDomain, ChatState],
+    chats: Map[UserWithDomain, ChannelState],
     eventListeners: Set[ActorRef])
 
   object Messages {
@@ -124,6 +154,7 @@ object Client {
     object GetRoster
     case class GetRosterResponse(roster: Roster)
 
+    case class SendMultiUserMessage(recipient: ChatRoom, message: String)
     case class SendMessage(recipient: User, message: String)
     case class SendUrlMessage(recipient: User, fileUri: URI, description: FileDescription)
     case class SendFileMessage(recipient: User, file: File, description: FileDescription)
@@ -216,7 +247,16 @@ class Client extends FSM[State, Context] {
           val fullUser = recipient.getFullyQualifiedUser(defaultDomain)
           val chat = ctx.chats(fullUser)
           val index = chat.messages.indexWhere(m ⇒ m.id == messageId)
-          ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(messages = chat.messages.updated(index, chat.messages(index).copy(status = Acknowledged)))))
+
+          val updatedMsgs = chat.messages.updated(index, chat.messages(index).copy(status = Acknowledged))
+
+          ctx.copy(chats = ctx.chats + (fullUser ->
+            (chat match {
+              case c: MultiUserChatState ⇒ c.copy(messages = updatedMsgs)
+              case c: ChatState ⇒ c.copy(messages = updatedMsgs)
+            })
+          ))
+
         case msg: Messages.ListenerEvent ⇒ ctx
       }
       val reportMsg = msg match {
@@ -226,16 +266,33 @@ class Client extends FSM[State, Context] {
       eventListeners foreach { _ ! reportMsg }
       stay using newCtx
 
+    case Event(Messages.SendMultiUserMessage(roomId, message), ctx @ Context(Some(connection), chats, _)) ⇒
+      val messageToSend = new Message(roomId.value, message)
+      val msgState = MessageState(message, MessageId(messageToSend.getStanzaId), Unacknowledged)
+      val originalSender = sender()
+
+      val room = getMultiUserChat(connection, roomId)
+
+      val chat = chats.getOrElse(key = UserWithDomain(roomId.value),
+        MultiUserChatState(room, Seq.empty))
+      log.info(s"message sent to $roomId")
+      originalSender ! MessageId(messageToSend.getStanzaId)
+      chat.sendMessage(messageToSend)
+
+      stay using ctx.copy(chats = ctx.chats + (UserWithDomain(roomId + "@" + chatService) → chat.withMessage(msgState)))
+
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
       val fullUser = user getFullyQualifiedUser domain
       val chat = chats.getOrElse(key = fullUser, ChatState(createChat(connection, user, domain), Seq.empty))
       val messageToSend = new Message(recipient.value, message)
-      chat.channel.sendMessage(messageToSend)
+
       log.info(s"message sent to $recipient")
       sender ! MessageId(messageToSend.getStanzaId)
+
       val msgState = MessageState(message, MessageId(messageToSend.getStanzaId), Unacknowledged)
-      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
+      chat.sendMessage(messageToSend)
+      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.withMessage(msgState)))
 
     case Event(Messages.SendUrlMessage(recipient, fileUri, description), ctx) ⇒
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
@@ -246,11 +303,11 @@ class Client extends FSM[State, Context] {
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
       val message = new Message(recipient.value, infoText)
       message.addExtension(fileInformation)
-      chat.channel.sendMessage(message)
+      chat.sendMessage(message)
       log.info(s"file message sent to $recipient")
       sender ! MessageId(message.getStanzaId)
       val msgState = MessageState(message.getBody, MessageId(message.getStanzaId), Unacknowledged)
-      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
+      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.withMessage(msgState)))
 
     case Event(Messages.SendFileMessage(recipient, file, description), ctx) ⇒
       implicit val globalEc = scala.concurrent.ExecutionContext.global
@@ -314,7 +371,7 @@ class Client extends FSM[State, Context] {
           chat.sendConfigurationForm(form)
         } match {
           case Failure(t) ⇒
-            log.error(t, s"Failure to create room ${chatRoom.value}");
+            log.error(t, s"Failure to create room ${chatRoom.value}")
             t match {
               case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.forbidden && ex.getXMPPError.getType == XMPPError.Type.AUTH ⇒ ActorFailure(Messages.Forbidden)
               case ex: IllegalStateException if ex.getMessage == "Creation failed - User already joined the room." ⇒ ActorFailure(Messages.RoomAlreadyExists(chatRoom))
@@ -335,7 +392,7 @@ class Client extends FSM[State, Context] {
           chat.grantMembership(fullUser.value)
         } match {
           case Failure(t) ⇒
-            log.error(t, s"Failure to grant membership");
+            log.error(t, s"Failure to grant membership")
             t match {
               case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.not_allowed && ex.getXMPPError.getType == XMPPError.Type.CANCEL ⇒ ActorFailure(Messages.Forbidden)
               case _ ⇒ ActorFailure(Messages.GeneralSmackError(t))
@@ -354,7 +411,7 @@ class Client extends FSM[State, Context] {
           chat.revokeMembership(fullUser.value)
         } match {
           case Failure(t) ⇒
-            log.error(t, s"Failure to remove membership");
+            log.error(t, s"Failure to remove membership")
             t match {
               case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.not_allowed && ex.getXMPPError.getType == XMPPError.Type.CANCEL ⇒ ActorFailure(Messages.Forbidden)
               case _ ⇒ ActorFailure(Messages.GeneralSmackError(t))
@@ -383,10 +440,9 @@ class Client extends FSM[State, Context] {
                   log.error(t, s"Error joining room ${room.value}")
                   ActorFailure(Messages.GeneralSmackError(t))
                 }
-              case _ ⇒ {
+              case _ ⇒
                 log.error(t, s"Error joining room ${room.value}")
                 ActorFailure(t)
-              }
             }
           case _ ⇒ ActorSuccess(Messages.Joined)
         }
@@ -475,7 +531,7 @@ class Client extends FSM[State, Context] {
   }
 
   def disconnect(ctx: Context): Unit = {
-    ctx.chats.values.foreach(_.channel.close())
+    ctx.chats.values.foreach(_.close())
     ctx.connection.foreach(_.disconnect())
     log.info("disconnected")
   }
@@ -500,6 +556,13 @@ class Client extends FSM[State, Context] {
     deliveryManager.autoAddDeliveryReceiptRequests()
     deliveryManager.setAutoReceiptMode(DeliveryReceiptManager.AutoReceiptMode.always)
     log.info(s"delivery manager created")
+  }
+
+  def getMultiUserChat(connection: XMPPTCPConnection, recipient: ChatRoom): MultiUserChat = {
+    val chatManager = MultiUserChatManager.getInstanceFor(connection)
+    val chat = chatManager.getMultiUserChat(recipient.value)
+    log.debug(s"chat with $recipient created")
+    chat
   }
 
   def createChat(connection: XMPPTCPConnection, recipient: UserWithoutDomain, domain: Domain): Chat = {
