@@ -269,59 +269,59 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         }
       }
 
-      "multi-user chat" that {
-        "succeeds" when {
-          "acknowledges delivered groupchat message" in new TestFunctions {
-            groupChatDeliveryAcknowledged
-          }
+     "multi-user chat" that {
+       "succeeds" when {
+         "acknowledges delivered groupchat message" in new TestFunctions {
+           groupChatDeliveryAcknowledged
+         }
 
-          "user send message to chatroom" in new TestFunctions {
-            chatRoomMessageSent
-          }
+         "user send message to chatroom" in new TestFunctions {
+           chatRoomMessageSent
+         }
 
-          "creating group chatroom" in new TestFunctionsWithDomain {
-            createChatRoom
-          }
+         "creating group chatroom" in new TestFunctionsWithDomain {
+           createChatRoom
+         }
 
-          "member joins room" in new TestFunctionsWithDomain {
-            memberJoin
-          }
+         "member joins room" in new TestFunctionsWithDomain {
+           memberJoin
+         }
 
-          "admin removes member" in new TestFunctionsWithDomain {
-            removeMember
-          }
+         "admin removes member" in new TestFunctionsWithDomain {
+           removeMember
+         }
 
-          "user gets membership" in new TestFunctionsWithDomain {
-            getMembership
-          }
-        }
+         "user gets membership" in new TestFunctionsWithDomain {
+           getMembership
+         }
+       }
 
-        "fails" when {
-          "creating chatroom that already exists" in new TestFunctionsWithDomain {
-            createMultipleChatRooms
-          }
+       "fails" when {
+         "creating chatroom that already exists" in new TestFunctionsWithDomain {
+           createMultipleChatRooms
+         }
 
-          "non-member tries to join room" in new TestFunctionsWithDomain {
-            failNonMember
-          }
+         "non-member tries to join room" in new TestFunctionsWithDomain {
+           failNonMember
+         }
 
-          "non admin tries to accept member" in new TestFunctionsWithDomain {
-            nonAdminMemberFail
-          }
+         "non admin tries to accept member" in new TestFunctionsWithDomain {
+           nonAdminMemberFail
+         }
 
-          "user tries to join with same nickname" in new TestFunctionsWithDomain {
-            sameNickname
-          }
+         "user tries to join with same nickname" in new TestFunctionsWithDomain {
+           sameNickname
+         }
 
-          "non admin tries to remove member" in new TestFunctionsWithDomain {
-            nonAdminRemoveFail
-          }
+         "non admin tries to remove member" in new TestFunctionsWithDomain {
+           nonAdminRemoveFail
+         }
 
-          "user tries to get membership when not part of group" in new TestFunctionsWithDomain {
-            forbiddenMembership
-          }
-        }
-      }
+         "user tries to get membership when not part of group" in new TestFunctionsWithDomain {
+           forbiddenMembership
+         }
+       }
+     }
     }
   }
 
