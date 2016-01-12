@@ -4,15 +4,15 @@ import java.io.{ InputStream, File }
 import java.net.URI
 
 import Client._
+import org.jivesoftware.smack.filter.StanzaTypeFilter
 import org.jivesoftware.smackx.muc.{ MultiUserChat, MultiUserChatManager }
-import org.jivesoftware.smackx.xdata.FormField
 import smack.scala.aws.S3Adapter
 import smack.scala.extensions._
-import akka.actor.{ Actor, ActorRef, FSM }
+import akka.actor.{ ActorRef, FSM }
 import com.typesafe.config.ConfigFactory
-import java.util.{ UUID, Collection }
+import java.util.Collection
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode
-import org.jivesoftware.smack.{ SmackException, StanzaListener }
+import org.jivesoftware.smack.{SmackException, StanzaListener}
 import org.jivesoftware.smack.XMPPException.XMPPErrorException
 import org.jivesoftware.smack.chat._
 import org.jivesoftware.smack.packet._
@@ -48,7 +48,7 @@ object Client {
 
   case class UserWithoutDomain(value: String) extends AnyVal {
     def getFullyQualifiedUser(d: Domain): UserWithDomain = {
-      UserWithDomain(s"${value}@${d.value}")
+      UserWithDomain(s"$value@${d.value}")
     }
   }
 
@@ -87,13 +87,68 @@ object Client {
     id: MessageId,
     status: MessageStatus)
 
+  sealed trait ChannelState {
+    val messages: Seq[MessageState]
+
+    def withMessageStatus(msgId: Client.MessageId, status: MessageStatus): ChannelState
+
+    def withMessage(msg: MessageState): ChannelState
+
+    def close(): Unit
+
+    def sendMessage(msg: Message): Unit
+  }
+
   case class ChatState(
     channel: Chat,
-    messages: Seq[MessageState])
+    override val messages: Seq[MessageState]) extends ChannelState {
+
+
+    override def withMessageStatus(msgId: MessageId, status: MessageStatus): ChannelState = {
+      this.copy( messages =
+        messages.find(_.id == msgId) match {
+          case Some(messageState) ⇒
+            messages.filterNot(_ == messageState) :+ messageState.copy(status = Client.Acknowledged)
+          case None ⇒
+            messages
+        }
+      )
+    }
+
+    override def withMessage(msg: MessageState): ChatState = this.copy(messages = messages :+ msg)
+
+    override def close(): Unit = channel.close()
+
+    override def sendMessage(msg: Message): Unit = channel.sendMessage(msg)
+
+  }
+
+  case class MultiUserChatState(
+    channel: MultiUserChat,
+    override val messages: Seq[MessageState]) extends ChannelState {
+
+    override def withMessageStatus(msgId: MessageId, status: MessageStatus): ChannelState = {
+      this.copy( messages =
+        messages.find(_.id == msgId) match {
+          case Some(messageState) ⇒
+            messages.filterNot(_ == messageState) :+ messageState.copy(status = Client.Acknowledged)
+          case None ⇒
+            messages
+        }
+      )
+    }
+
+    override def withMessage(msg: MessageState): MultiUserChatState = this.copy(messages = messages :+ msg)
+
+    override def close(): Unit = channel.leave()
+
+    override def sendMessage(msg: Message): Unit = channel.sendMessage(msg)
+
+  }
 
   case class Context(
     connection: Option[XMPPTCPConnection],
-    chats: Map[UserWithDomain, ChatState],
+    chats: Map[UserWithDomain, ChannelState],
     eventListeners: Set[ActorRef])
 
   object Messages {
@@ -124,6 +179,7 @@ object Client {
     object GetRoster
     case class GetRosterResponse(roster: Roster)
 
+    case class SendMultiUserMessage(recipient: ChatRoom, message: String)
     case class SendMessage(recipient: User, message: String)
     case class SendUrlMessage(recipient: User, fileUri: URI, description: FileDescription)
     case class SendFileMessage(recipient: User, file: File, description: FileDescription)
@@ -135,10 +191,12 @@ object Client {
     case class ArchiveMessageRequest(user: User, start: Option[DateTime] = None, end: Option[DateTime] = None, limit: Option[Int] = None, skipToMessage: Option[MessageId] = None)
 
     sealed trait ListenerEvent
+    case class GroupChatMessageReceived(chatRoom: ChatRoom, message: Message) extends ListenerEvent
     case class MessageReceived(chat: Chat, message: Message) extends ListenerEvent
     case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
+    case class GroupChatMessageDelivered(chat: ChatRoom, message: Message) extends ListenerEvent
     case class MessageDelivered(user: User, messageId: MessageId) extends ListenerEvent
     case class FileUploaded(forUser: User, uri: URI, description: FileDescription) extends ListenerEvent
     case class ArchiveMessageResponse(to: User, from: User, message: Message, origStamp: DateTime, id: String, queryId: Option[String] = None) extends ListenerEvent
@@ -176,6 +234,8 @@ class Client extends FSM[State, Context] {
       Try { connect(c.user, c.password) } match {
         case Success(connection) ⇒
           log.info(s"${c.user} successfully connected")
+          connection.addSyncStanzaListener(groupChatMessageListener, new StanzaTypeFilter(classOf[Message]))
+          sender ! Messages.Connected
           goto(Connected) using ctx.copy(connection = Some(connection))
         case Failure(t) ⇒
           log.error(t, s"unable to connect as ${c.user}")
@@ -208,15 +268,51 @@ class Client extends FSM[State, Context] {
 
     case Event(msg: Messages.ListenerEvent, ctx @ Context(Some(connection), chats, eventListeners)) ⇒
       val newCtx = msg match {
+        case Messages.GroupChatMessageReceived(chat, message) ⇒
+          if ( log.isDebugEnabled ) {
+            log.debug(s"group chat message received ${chat.value}: $message")
+          }
+
+          val roomId = UserWithDomain(chat.value)
+          val messageId = message.getStanzaId
+
+          ctx.chats.get(roomId) match {
+            case Some(chatCtx)
+              if chatCtx.messages.exists( m ⇒ m.id.value == messageId && m.status == Client.Unacknowledged) ⇒
+                self ! Messages.GroupChatMessageDelivered(chat, message)
+            case e: Any ⇒
+          }
+
+          ctx
+
         case Messages.MessageReceived(chat, message) ⇒
           val (user, domain) = User(chat.getParticipant).splitUserIntoNameAndDomain(defaultDomain)
           subscribeToStatus(connection, user, domain)
           ctx
+
+        case Messages.GroupChatMessageDelivered(chat, message) ⇒
+          val roomId = UserWithDomain(chat.value + "@" + chatService.value)
+
+          ctx.copy( chats =
+            if(!chats.contains(roomId)) chats
+            else chats + (roomId → chats(roomId).withMessageStatus(Client.MessageId(message.getStanzaId),
+              Client.Acknowledged))
+          )
+
         case Messages.MessageDelivered(recipient, messageId) ⇒
           val fullUser = recipient.getFullyQualifiedUser(defaultDomain)
           val chat = ctx.chats(fullUser)
           val index = chat.messages.indexWhere(m ⇒ m.id == messageId)
-          ctx.copy(chats = ctx.chats + (fullUser -> chat.copy(messages = chat.messages.updated(index, chat.messages(index).copy(status = Acknowledged)))))
+
+          val updatedMsgs = chat.messages.updated(index, chat.messages(index).copy(status = Acknowledged))
+
+          ctx.copy(chats = ctx.chats + (fullUser ->
+            (chat match {
+              case c: MultiUserChatState ⇒ c.copy(messages = updatedMsgs)
+              case c: ChatState ⇒ c.copy(messages = updatedMsgs)
+            })
+          ))
+
         case msg: Messages.ListenerEvent ⇒ ctx
       }
       val reportMsg = msg match {
@@ -226,16 +322,34 @@ class Client extends FSM[State, Context] {
       eventListeners foreach { _ ! reportMsg }
       stay using newCtx
 
+    case Event(Messages.SendMultiUserMessage(roomId, message), ctx @ Context(Some(connection), chats, _)) ⇒
+      val messageToSend = new Message(roomId.value, Message.Type.groupchat)
+      messageToSend.setBody(message)
+      val msgState = MessageState(message, MessageId(messageToSend.getStanzaId), Unacknowledged)
+      val originalSender = sender()
+
+      val room = getMultiUserChat(connection, roomId)
+
+      val chatKey = UserWithDomain(roomId.value + "@" + chatService.value)
+      val chat = chats.getOrElse(key = chatKey, MultiUserChatState(room, Seq.empty))
+      log.info(s"message sent to $roomId")
+      originalSender ! MessageId(messageToSend.getStanzaId)
+      chat.sendMessage(messageToSend)
+
+      stay using ctx.copy(chats = ctx.chats + (chatKey → chat.withMessage(msgState)))
+
     case Event(Messages.SendMessage(recipient, message), ctx @ Context(Some(connection), chats, _)) ⇒
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
       val fullUser = user getFullyQualifiedUser domain
       val chat = chats.getOrElse(key = fullUser, ChatState(createChat(connection, user, domain), Seq.empty))
       val messageToSend = new Message(recipient.value, message)
-      chat.channel.sendMessage(messageToSend)
+
       log.info(s"message sent to $recipient")
       sender ! MessageId(messageToSend.getStanzaId)
+
       val msgState = MessageState(message, MessageId(messageToSend.getStanzaId), Unacknowledged)
-      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
+      chat.sendMessage(messageToSend)
+      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.withMessage(msgState)))
 
     case Event(Messages.SendUrlMessage(recipient, fileUri, description), ctx) ⇒
       val (user, domain) = recipient.splitUserIntoNameAndDomain(defaultDomain)
@@ -246,11 +360,11 @@ class Client extends FSM[State, Context] {
         "implement XEP-0066. If you don't see the file, kindly ask the client developer."
       val message = new Message(recipient.value, infoText)
       message.addExtension(fileInformation)
-      chat.channel.sendMessage(message)
+      chat.sendMessage(message)
       log.info(s"file message sent to $recipient")
       sender ! MessageId(message.getStanzaId)
       val msgState = MessageState(message.getBody, MessageId(message.getStanzaId), Unacknowledged)
-      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.copy(messages = chat.messages :+ msgState)))
+      stay using ctx.copy(chats = ctx.chats + (fullUser → chat.withMessage(msgState)))
 
     case Event(Messages.SendFileMessage(recipient, file, description), ctx) ⇒
       implicit val globalEc = scala.concurrent.ExecutionContext.global
@@ -314,7 +428,7 @@ class Client extends FSM[State, Context] {
           chat.sendConfigurationForm(form)
         } match {
           case Failure(t) ⇒
-            log.error(t, s"Failure to create room ${chatRoom.value}");
+            log.error(t, s"Failure to create room ${chatRoom.value}")
             t match {
               case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.forbidden && ex.getXMPPError.getType == XMPPError.Type.AUTH ⇒ ActorFailure(Messages.Forbidden)
               case ex: IllegalStateException if ex.getMessage == "Creation failed - User already joined the room." ⇒ ActorFailure(Messages.RoomAlreadyExists(chatRoom))
@@ -335,7 +449,7 @@ class Client extends FSM[State, Context] {
           chat.grantMembership(fullUser.value)
         } match {
           case Failure(t) ⇒
-            log.error(t, s"Failure to grant membership");
+            log.error(t, s"Failure to grant membership")
             t match {
               case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.not_allowed && ex.getXMPPError.getType == XMPPError.Type.CANCEL ⇒ ActorFailure(Messages.Forbidden)
               case _ ⇒ ActorFailure(Messages.GeneralSmackError(t))
@@ -354,7 +468,7 @@ class Client extends FSM[State, Context] {
           chat.revokeMembership(fullUser.value)
         } match {
           case Failure(t) ⇒
-            log.error(t, s"Failure to remove membership");
+            log.error(t, s"Failure to remove membership")
             t match {
               case ex: XMPPErrorException if ex.getXMPPError.getCondition == XMPPError.Condition.not_allowed && ex.getXMPPError.getType == XMPPError.Type.CANCEL ⇒ ActorFailure(Messages.Forbidden)
               case _ ⇒ ActorFailure(Messages.GeneralSmackError(t))
@@ -383,10 +497,9 @@ class Client extends FSM[State, Context] {
                   log.error(t, s"Error joining room ${room.value}")
                   ActorFailure(Messages.GeneralSmackError(t))
                 }
-              case _ ⇒ {
+              case _ ⇒
                 log.error(t, s"Error joining room ${room.value}")
                 ActorFailure(t)
-              }
             }
           case _ ⇒ ActorSuccess(Messages.Joined)
         }
@@ -475,7 +588,7 @@ class Client extends FSM[State, Context] {
   }
 
   def disconnect(ctx: Context): Unit = {
-    ctx.chats.values.foreach(_.channel.close())
+    ctx.chats.values.foreach(_.close())
     ctx.connection.foreach(_.disconnect())
     log.info("disconnected")
   }
@@ -500,6 +613,13 @@ class Client extends FSM[State, Context] {
     deliveryManager.autoAddDeliveryReceiptRequests()
     deliveryManager.setAutoReceiptMode(DeliveryReceiptManager.AutoReceiptMode.always)
     log.info(s"delivery manager created")
+  }
+
+  def getMultiUserChat(connection: XMPPTCPConnection, recipient: ChatRoom): MultiUserChat = {
+    val chatManager = MultiUserChatManager.getInstanceFor(connection)
+    val chat = chatManager.getMultiUserChat(recipient.value + "@" + chatService.value)
+    log.debug(s"chat with $recipient created")
+    chat
   }
 
   def createChat(connection: XMPPTCPConnection, recipient: UserWithoutDomain, domain: Domain): Chat = {
@@ -533,6 +653,21 @@ class Client extends FSM[State, Context] {
   val extensions = Set[ExtensionInfoProvider](OutOfBandData, MAMResponse, MAMFin)
   def getExtension(message: Message) = {
     extensions map (e ⇒ Option(message.getExtension[ExtensionElement](e.ElementName, e.XmlNamespace))) collect { case Some(e) ⇒ e }
+  }
+
+  val groupChatMessageListener = new StanzaListener {
+    override def processPacket(packet: Stanza): Unit = {
+      packet.asInstanceOf[Message] match {
+        case msg if msg.getType == Message.Type.groupchat ⇒
+          val index = msg.getFrom.lastIndexOf('/')
+          val chatRoomId =
+            if (index > 0) ChatRoom(msg.getFrom.substring(0, index))
+            else ChatRoom(msg.getFrom)
+
+          self ! Messages.GroupChatMessageReceived(chatRoomId, packet.asInstanceOf[Message])
+        case _ ⇒
+      }
+    }
   }
 
   val chatMessageListener = new ChatMessageListener {

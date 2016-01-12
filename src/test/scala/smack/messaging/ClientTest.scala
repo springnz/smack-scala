@@ -127,6 +127,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "multi-user chat" that {
         "succeeds" when {
+          "acknowledges delivered groupchat message" in new TestFunctions {
+            groupChatDeliveryAcknowledged
+          }
+
+          "user send message to chatroom" in new TestFunctions {
+            chatRoomMessageSent
+          }
+
           "creating group chatroom" in new TestFunctions {
             createChatRoom
           }
@@ -263,6 +271,14 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
      "multi-user chat" that {
        "succeeds" when {
+         "acknowledges delivered groupchat message" in new TestFunctions {
+           groupChatDeliveryAcknowledged
+         }
+
+         "user send message to chatroom" in new TestFunctions {
+           chatRoomMessageSent
+         }
+
          "creating group chatroom" in new TestFunctionsWithDomain {
            createChatRoom
          }
@@ -391,9 +407,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         user1 ! SendMessage(username2, testMessage)
 
-        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
-        Thread.sleep(1000)
-        user2 ! Connect(username2, user2Pass)
+        val connectionTimeout = 1.second
+        Await.result(user2 ? Connect(username2, user2Pass), connectionTimeout)
 
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
       }
@@ -489,6 +504,22 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
+    def chatRoomMessageSent = {
+      withChatRoomMembers {
+        user1 ? SendMultiUserMessage(chatRoom, testMessage)
+        verifyGroupMessageArrived(user2Listener, username2, chatRoom, testMessage)
+        verifyGroupMessageArrived(user1Listener, username1, chatRoom, testMessage)
+      }
+    }
+
+    def groupChatDeliveryAcknowledged = {
+      withChatRoomMembers {
+        val user1MessageId = user1 ? SendMultiUserMessage(chatRoom, testMessage)
+        verifyGroupMessageArrived(user1Listener, username1, chatRoom, testMessage)
+        verifyGroupMessageDelivery(user1Listener, chatRoom, username1, user1MessageId)
+      }
+    }
+
     def deliveryAcknowledged = {
       withTwoConnectedUsers {
         val user1MessageId = user1 ? SendMessage(username2, testMessage)
@@ -505,9 +536,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
         val user1MessageId = user1 ? SendMessage(username2, testMessage)
 
-        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
-        Thread.sleep(1000)
-        user2 ! Connect(username2, user2Pass)
+        val connectionTimeout = 1.second
+        Await.result(user2 ? Connect(username2, user2Pass), connectionTimeout)
 
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
         verifyMessageDelivery(user1Listener, username1, username2, user1MessageId)
@@ -531,9 +561,8 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             ids(0).id shouldBe user1MessageId
         }
 
-        // yeah, sleeping is bad, but I dunno how else to make this guaranteed async.
-        Thread.sleep(1000)
-        user2 ! Connect(username2, user2Pass)
+        val connectionTimeout = 1.second
+        Await.result(user2 ? Connect(username2, user2Pass), connectionTimeout)
 
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
         verifyMessageDelivery(user1Listener, username1, username2, user1MessageIdFuture)
@@ -848,6 +877,32 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
     }
 
+    def withChatRoomMembers(block: => Unit) = {
+      withChatRoom() {
+        withTwoConnectedUsers {
+          adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+          user1 ? ChatRoomJoin(chatRoom, username1Nickname)
+
+          adminUser ? RegisterChatRoomMembership(chatRoom, username2)
+          user2 ? ChatRoomJoin(chatRoom, username2Nickname)
+
+          block
+        }
+      }
+    }
+
+    def verifyGroupMessageArrived(testProbe: TestProbe, sender: User, recipient: ChatRoom, messageBody: String): Unit = {
+      testProbe.fishForMessage(timeout.duration, "expected message to be delivered") {
+        case GroupChatMessageReceived(chat, message) ⇒
+          chat.value should startWith(recipient.value)
+          message.getFrom should startWith(recipient.value)
+          message.getTo should startWith(sender.value)
+          message.getBody shouldBe messageBody
+          true
+        case _ ⇒ false
+      }
+    }
+
     def verifyMessageArrived(testProbe: TestProbe, sender: User, recipient: User, messageBody: String): Unit = {
       testProbe.fishForMessage(timeout.duration, "expected message to be delivered") {
         case MessageReceived(chat, message) ⇒
@@ -856,6 +911,20 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
           message.getBody shouldBe messageBody
           true
         case _ ⇒ false
+      }
+    }
+
+    def verifyGroupMessageDelivery(testProbe: TestProbe, chatRoom: Client.ChatRoom, user: Client.User,
+                                   messageIdFuture: Future[Any]): Unit = {
+      testProbe.fishForMessage(timeout.duration, "notification that message has been delivered to the group chat") {
+        case GroupChatMessageDelivered(chat, msgId) ⇒
+          Await.result(messageIdFuture, timeout.duration) match {
+            case MessageId(messageId) ⇒
+              messageId should equal(msgId.getStanzaId)
+          }
+          true
+
+        case e ⇒ false
       }
     }
 
