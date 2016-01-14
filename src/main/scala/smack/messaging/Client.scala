@@ -160,6 +160,10 @@ object Client {
     case class RegisterChatRoomMembership(room: ChatRoom, user: User)
     case class RemoveChatRoomMembership(room: ChatRoom, user: User)
     case class ChatRoomJoin(room: ChatRoom, name: ChatNickname)
+    case class ChatRoomLeave(room: ChatRoom)
+    case class ChatRoomLeaveResponse(room: ChatRoom)
+    case object GetUserGroupchatPresence
+    case class GetUserGroupchatPresenceResponse(set: Set[ChatRoomId])
     case class GetChatRoomsResponse(rooms: Set[ChatRoomId])
     case class DeleteChatRoom(room: ChatRoom, reason: Option[ChatRoomStatus] = None, alternativeRoom: Option[ChatRoom] = None)
 
@@ -234,6 +238,7 @@ class Client extends FSM[State, Context] {
       Try { connect(c.user, c.password) } match {
         case Success(connection) ⇒
           log.info(s"${c.user} successfully connected")
+          AccountManager.getInstance(connection).sensitiveOperationOverInsecureConnection(true)
           connection.addSyncStanzaListener(groupChatMessageListener, new StanzaTypeFilter(classOf[Message]))
           sender ! Messages.Connected
           goto(Connected) using ctx.copy(connection = Some(connection))
@@ -378,6 +383,29 @@ class Client extends FSM[State, Context] {
       }
       stay
 
+    case Event(r @ Messages.GetUserGroupchatPresence, Context(Some(connection),  _, _)) ⇒
+      val response =
+        Try {
+          MultiUserChatManager.getInstanceFor(connection).getJoinedRooms()
+        } match {
+          case Success(roomsList) ⇒
+            Messages.GetUserGroupchatPresenceResponse(roomsList.toSet[String] map { r ⇒
+              val roomParts = r.split("@")
+              val roomName = Client.ChatRoom(roomParts(0))
+              val roomService = ChatService( if(roomParts(1).indexOf("/") > 0)
+                roomParts(1).substring(0, roomParts(1).indexOf("/")) else roomParts(1))
+
+              ChatRoomId(roomName, roomService)
+            })
+          case Failure(e) ⇒
+            log.error(e.getMessage, e)
+            Messages.GeneralSmackError(e)
+        }
+
+      sender ! response
+
+      stay()
+
     case Event(register: Messages.RegisterUser, Context(Some(connection), chats, _)) ⇒
       log.info(s"trying to register ${register.user}")
       val accountManager = AccountManager.getInstance(connection)
@@ -478,6 +506,23 @@ class Client extends FSM[State, Context] {
         sender ! response
       }
       stay
+
+    case Event(Messages.ChatRoomLeave(room), ctx @ Context(Some(connection), chats, _)) ⇒
+      val roomJid = ChatRoomId(room, chatService)
+      val multiUserChat = MultiUserChatManager.getInstanceFor(connection).getMultiUserChat(roomJid.toString)
+
+      val response = Try {
+        if ( multiUserChat.isJoined )
+          multiUserChat.leave()
+        else log.warning("User is not present in the requested chat")
+      } match {
+        case Success(_) ⇒ Client.Messages.ChatRoomLeaveResponse(room)
+        case Failure(e) ⇒ Client.Messages.GeneralSmackError(e)
+      }
+
+      sender() ! response
+
+      stay()
 
     case Event(Messages.ChatRoomJoin(room, nickname), Context(Some(connection), _, _)) ⇒
       withChatRoom(room, connection) { chat ⇒
