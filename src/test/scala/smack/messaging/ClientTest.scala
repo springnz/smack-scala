@@ -127,6 +127,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
       "multi-user chat" that {
         "succeeds" when {
+          "member leaving groupchat" in new TestFunctions {
+            memberLeavesGroupChat
+          }
+
           "acknowledges delivered groupchat message" in new TestFunctions {
             groupChatDeliveryAcknowledged
           }
@@ -271,6 +275,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
 
      "multi-user chat" that {
        "succeeds" when {
+         "member leaving groupchat" in new TestFunctions {
+           memberLeavesGroupChat
+         }
+
          "acknowledges delivered groupchat message" in new TestFunctions {
            groupChatDeliveryAcknowledged
          }
@@ -500,6 +508,33 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
             user.value should startWith(username2.value)
             true
           case _ ⇒ false
+        }
+      }
+    }
+
+    def memberLeavesGroupChat = {
+      withChatRoom() {
+        withTwoConnectedUsers {
+          val userRooms = Await.result( (user1 ? GetChatRooms).mapTo[GetChatRoomsResponse], 1.second)
+
+          val response = Await.result(
+            for {
+              _ ← Future.sequence( userRooms.rooms map { room ⇒ adminUser ? RemoveChatRoomMembership(room.room, username1) } )
+              _ ← adminUser ? RegisterChatRoomMembership(chatRoom, username1)
+              _ ← user1 ? ChatRoomJoin(chatRoom, username1Nickname)
+              roomsAfterJoin ← user1 ? GetUserGroupchatPresence
+              resp ← user1 ? ChatRoomLeave(chatRoom)
+              rooms ← user1 ? GetUserGroupchatPresence
+            } yield (resp, roomsAfterJoin, rooms), 5.seconds)
+
+          response match {
+            case (ChatRoomLeaveResponse(r), GetUserGroupchatPresenceResponse(roomsAfterJoin), GetUserGroupchatPresenceResponse(rooms)) ⇒
+              r shouldBe chatRoom
+              roomsAfterJoin should have size 1
+              roomsAfterJoin should contain theSameElementsAs Set(ChatRoomId(chatRoom, chatService))
+              rooms shouldBe empty
+            case e: Any ⇒ fail(s"Unknown message type: $e")
+          }
         }
       }
     }
