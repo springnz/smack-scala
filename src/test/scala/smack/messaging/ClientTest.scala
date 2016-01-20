@@ -88,6 +88,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
 
       "have extended functionality" that {
+        "enables XEP-0066 group file transfers" in new TestFunctions {
+          XEP_0066_GroupFileTransfers
+        }
+
         "enables XEP-0066 file transfers" in new TestFunctions {
           XEP_0066_FileTransfers
         }
@@ -236,6 +240,10 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
       }
 
       "have extended functionality" that {
+        "enables XEP-0066 group file transfers" in new TestFunctions {
+          XEP_0066_GroupFileTransfers
+        }
+
         "enables XEP-0066 file transfers" in new TestFunctionsWithDomain {
           XEP_0066_FileTransfers
         }
@@ -419,6 +427,22 @@ class ClientTest extends WordSpec with Matchers with BeforeAndAfterEach {
         Await.result(user2 ? Connect(username2, user2Pass), connectionTimeout)
 
         verifyMessageArrived(user2Listener, username1, username2, testMessage)
+      }
+    }
+
+    def XEP_0066_GroupFileTransfers = {
+      withChatRoomMembers {
+        val fileUrl = URI.create("https://raw.githubusercontent.com/mpollmeier/gremlin-scala/master/README.md")
+        val fileDescription = FileDescription(Some("file description"))
+        user1 ! SendMultiUserUrlMessage(chatRoom, fileUrl, fileDescription)
+
+        user2Listener.expectMsgPF(timeout.duration, "xep-0066 file transfer from joined group") {
+          case GroupChatFileMessageReceived(chat, message, outOfBandData) ⇒
+            message.getFrom should endWith(username1Nickname.value)
+            message.getTo should startWith(username2.value)
+            outOfBandData.url shouldBe fileUrl
+            outOfBandData.desc shouldBe fileDescription
+        }
       }
     }
 

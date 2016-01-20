@@ -179,11 +179,14 @@ object Client {
     object Connected
     case class ConnectError(t: Throwable)
     object Disconnect
+    object Disconnected
 
     object GetRoster
     case class GetRosterResponse(roster: Roster)
 
     case class SendMultiUserMessage(recipient: ChatRoom, message: String)
+    case class SendMultiUserUrlMessage(recipient: ChatRoom, fileUri: URI, description: FileDescription)
+
     case class SendMessage(recipient: User, message: String)
     case class SendUrlMessage(recipient: User, fileUri: URI, description: FileDescription)
     case class SendFileMessage(recipient: User, file: File, description: FileDescription)
@@ -197,6 +200,7 @@ object Client {
     sealed trait ListenerEvent
     case class GroupChatMessageReceived(chatRoom: ChatRoom, message: Message) extends ListenerEvent
     case class MessageReceived(chat: Chat, message: Message) extends ListenerEvent
+    case class GroupChatFileMessageReceived(chat: ChatRoom, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
     case class FileMessageReceived(chat: Chat, message: Message, outOfBandData: OutOfBandData) extends ListenerEvent
     case class UserBecameAvailable(user: User) extends ListenerEvent
     case class UserBecameUnavailable(user: User) extends ListenerEvent
@@ -238,7 +242,6 @@ class Client extends FSM[State, Context] {
       Try { connect(c.user, c.password) } match {
         case Success(connection) ⇒
           log.info(s"${c.user} successfully connected")
-          AccountManager.getInstance(connection).sensitiveOperationOverInsecureConnection(true)
           connection.addSyncStanzaListener(groupChatMessageListener, new StanzaTypeFilter(classOf[Message]))
           sender ! Messages.Connected
           goto(Connected) using ctx.copy(connection = Some(connection))
@@ -266,7 +269,7 @@ class Client extends FSM[State, Context] {
   when(Connected) {
     case Event(Messages.Disconnect, ctx) ⇒
       disconnect(ctx)
-      goto(Unconnected) using ctx.copy(connection = None, chats = Map.empty)
+      goto(Unconnected) using ctx.copy(connection = None, chats = Map.empty) replying Messages.Disconnected
 
     case Event(Messages.RegisterEventListener(actor), ctx) ⇒
       stay using ctx.copy(eventListeners = ctx.eventListeners + actor)
@@ -327,6 +330,24 @@ class Client extends FSM[State, Context] {
       eventListeners foreach { _ ! reportMsg }
       stay using newCtx
 
+    case Event(Messages.SendMultiUserUrlMessage(roomId, fileUri, description), ctx @ Context(Some(connection), chats, _)) ⇒
+      val room = getMultiUserChat(connection, roomId)
+
+      val roomRecepientForm = UserWithoutDomain(roomId.value).getFullyQualifiedUser(Client.Domain(chatService.value))
+      val chat = chats.getOrElse(key = roomRecepientForm, MultiUserChatState(room, Seq.empty))
+
+      val fileInformation = OutOfBandData(fileUri, description)
+      val infoText = "This message contains a link to a file, your client needs to " +
+        "implement XEP-0066. If you don't see the file, kindly ask the client developer."
+
+      val message = new Message(roomRecepientForm.value, infoText)
+      message.addExtension(fileInformation)
+      chat.sendMessage(message)
+      log.info(s"file message sent to $roomRecepientForm")
+      sender ! MessageId(message.getStanzaId)
+      val msgState = MessageState(message.getBody, MessageId(message.getStanzaId), Unacknowledged)
+      stay using ctx.copy(chats = ctx.chats + (roomRecepientForm → chat.withMessage(msgState)))
+
     case Event(Messages.SendMultiUserMessage(roomId, message), ctx @ Context(Some(connection), chats, _)) ⇒
       val messageToSend = new Message(roomId.value, Message.Type.groupchat)
       messageToSend.setBody(message)
@@ -335,7 +356,7 @@ class Client extends FSM[State, Context] {
 
       val room = getMultiUserChat(connection, roomId)
 
-      val chatKey = UserWithDomain(roomId.value + "@" + chatService.value)
+      val chatKey = UserWithDomain(ChatRoomId(roomId, chatService).toString)
       val chat = chats.getOrElse(key = chatKey, MultiUserChatState(room, Seq.empty))
       log.info(s"message sent to $roomId")
       originalSender ! MessageId(messageToSend.getStanzaId)
@@ -709,7 +730,31 @@ class Client extends FSM[State, Context] {
             if (index > 0) ChatRoom(msg.getFrom.substring(0, index))
             else ChatRoom(msg.getFrom)
 
-          self ! Messages.GroupChatMessageReceived(chatRoomId, packet.asInstanceOf[Message])
+          val messageExtensions = getExtension(msg)
+          if ( messageExtensions.isEmpty ) {
+            self ! Messages.GroupChatMessageReceived(chatRoomId, packet.asInstanceOf[Message])
+          } else {
+            messageExtensions foreach {
+              case ob: OutOfBandData ⇒
+                OutOfBandData.fromXml(ob.toXML) match {
+                  case Success(outOfBandData) ⇒
+                    log.debug(s"GroupChatMessageListener: received file message for $chatRoomId : $msg")
+                    self ! Messages.GroupChatFileMessageReceived(chatRoomId, msg, outOfBandData)
+                  case Failure(t) ⇒
+                    log.error(t, "GroupChatMessageListener: received file message but was unable to parse the extension into a XEP-0066 format")
+                    self ! Messages.GroupChatMessageReceived(chatRoomId, msg)
+                }
+
+              case MAMResponse(message, origStamp, id, queryId) ⇒
+                self ! Messages.ArchiveMessageResponse(User(message.getTo), User(message.getFrom), message, origStamp, id, queryId)
+              case MAMFin(firstMessageId, lastMessageId, idx, count, complete) ⇒
+                self ! Messages.ArchiveMessageEnd(firstMessageId, lastMessageId, idx, count, complete)
+
+              case e: Any ⇒
+                log.error(s"Message with unknown extension type received $e")
+                self ! Messages.GroupChatMessageReceived(chatRoomId, msg)
+            }
+          }
         case _ ⇒
       }
     }
